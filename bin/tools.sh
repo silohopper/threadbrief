@@ -14,6 +14,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV="${1:-}"
 CMD="${2:-}"
 ARG="${3:-}"
+RED="\033[31m"
+RESET="\033[0m"
 
 # Binaries
 DOCKER_BIN="$(command -v docker || true)"
@@ -76,6 +78,13 @@ EOF
 }
 
 if [ -z "$ENV" ] || [ -z "$CMD" ]; then
+  printf "%bNot enough arguments. Usage: sh bin/tools.sh <env> <command> [service]%b\n" "$RED" "$RESET"
+  if [ -z "$ENV" ]; then
+    printf "%bMissing environment. Expected: dev | stage | prod.%b\n" "$RED" "$RESET"
+  else
+    printf "%bMissing command for environment '%s'.%b\n" "$RED" "$ENV" "$RESET"
+  fi
+  echo
   help
   exit 1
 fi
@@ -143,7 +152,7 @@ case "$CMD" in
     compose dev build
     ;;
   *)
-    echo "Unknown command: $CMD"
+    echo "Unknown dev command: $CMD"
     help
     exit 1
     ;;
