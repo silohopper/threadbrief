@@ -17,16 +17,29 @@ ARG="${3:-}"
 
 # Binaries
 DOCKER_BIN="$(command -v docker || true)"
-COMPOSE_BIN="$(command -v docker-compose || true)"
+DOCKER_COMPOSE_BIN="$(command -v docker-compose || true)"
+HAS_DOCKER_COMPOSE_PLUGIN=false
+
+if [ -n "$DOCKER_BIN" ] && "$DOCKER_BIN" compose version >/dev/null 2>&1; then
+  HAS_DOCKER_COMPOSE_PLUGIN=true
+fi
 
 compose() {
   local env="$1"
-  if [ -z "$COMPOSE_BIN" ]; then
-    # docker compose (plugin) fallback
-    $DOCKER_BIN compose -f "$ROOT_DIR/env/$env/docker-compose.yml" "$@"
-  else
-    $COMPOSE_BIN -f "$ROOT_DIR/env/$env/docker-compose.yml" "$@"
+  shift
+
+  if [ "$HAS_DOCKER_COMPOSE_PLUGIN" = true ]; then
+    "$DOCKER_BIN" compose -f "$ROOT_DIR/env/$env/docker-compose.yml" "$@"
+    return
   fi
+
+  if [ -n "$DOCKER_COMPOSE_BIN" ]; then
+    "$DOCKER_COMPOSE_BIN" -f "$ROOT_DIR/env/$env/docker-compose.yml" "$@"
+    return
+  fi
+
+  echo "docker compose not found. Install Docker Desktop or docker-compose." >&2
+  exit 1
 }
 
 help() {
