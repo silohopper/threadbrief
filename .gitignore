@@ -1,0 +1,9 @@
+node_modules
+.env
+.env.*
+__pycache__
+*.pyc
+dist
+.next
+.terraform
+.DS_Store

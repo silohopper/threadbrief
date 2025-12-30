@@ -1,0 +1,26 @@
+services:
+  api:
+    build:
+      context: ../../services/api
+      dockerfile: Dockerfile
+    env_file:
+      - ./.env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../../services/api:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+  web:
+    build:
+      context: ../../services/web
+      dockerfile: Dockerfile
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../../services/web:/app
+      - /app/node_modules
+    command: npm run dev
+    depends_on:
+      - api
