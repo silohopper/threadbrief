@@ -267,8 +267,7 @@ export default function HomePage() {
 
 ${brief.overview}
 
-${brief.bullets.map((x) => `- ${x}`).join("
-")}${
+${brief.bullets.map((x) => `- ${x}`).join("\n")}${
                       brief.why_it_matters ? `
 
 Why it matters:
