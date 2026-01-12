@@ -1,11 +1,13 @@
 """LLM prompt construction and response generation helpers."""
 
+import asyncio
 import hashlib
 import json
+import os
 import httpx
 from app.models import ModeType, LengthType
 
-GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent"
 
 
 def _length_guidance(length: LengthType) -> str:
@@ -78,15 +80,22 @@ async def generate_brief_gemini(api_key: str, prompt: str) -> str:
         "generationConfig": {"temperature": 0.4, "maxOutputTokens": 900},
     }
     url = f"{GEMINI_ENDPOINT}?key={api_key}"
+    max_retries = int(os.getenv("GEMINI_MAX_RETRIES", "3"))
+    backoff = float(os.getenv("GEMINI_RETRY_BACKOFF", "1.0"))
+
     async with httpx.AsyncClient(timeout=45) as client:
-        r = await client.post(url, headers=headers, json=payload)
-        r.raise_for_status()
-        data = r.json()
-        # Pull first candidate text
-        try:
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception:
-            return json.dumps(data)
+        for attempt in range(max_retries + 1):
+            r = await client.post(url, headers=headers, json=payload)
+            if r.status_code in {429, 500, 502, 503, 504} and attempt < max_retries:
+                await asyncio.sleep(backoff * (2 ** attempt))
+                continue
+            r.raise_for_status()
+            data = r.json()
+            # Pull first candidate text
+            try:
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+            except Exception:
+                return json.dumps(data)
 
 
 def mock_brief(prompt: str) -> str:

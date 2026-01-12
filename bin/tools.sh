@@ -62,6 +62,7 @@ COMMANDS (dev)
   lint              lint web + api
   test              run api tests
   test-youtube      run YouTube integration test (requires network)
+  test-gemini       run Gemini integration test (requires GEMINI_API_KEY)
   format            format web + api
   build             build web + api images
 
@@ -151,6 +152,10 @@ case "$CMD" in
   test-youtube)
     echo "[DEV] Running YouTube integration test..."
     compose dev exec -T api sh -lc "YOUTUBE_INTEGRATION=1 pytest -q -k youtube -s"
+    ;;
+  test-gemini)
+    echo "[DEV] Running Gemini integration test..."
+    compose dev exec -T api sh -lc "GEMINI_INTEGRATION=1 pytest -q -k gemini -s"
     ;;
   build)
     echo "[DEV] Building images..."

@@ -17,6 +17,7 @@
 ## How to test
 - API unit tests: `cd services/api && pytest`
 - YouTube integration test: `sh bin/tools.sh dev test-youtube` (requires network + ffmpeg/whisper in Docker)
+- Gemini integration test: `sh bin/tools.sh dev test-gemini` (requires `GEMINI_API_KEY`)
 - Lint: `ruff check services/api`
 
 ## YouTube audio fallback (optional)
