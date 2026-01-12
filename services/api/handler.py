@@ -1,3 +1,5 @@
+"""AWS Lambda handler adapter for the FastAPI app."""
+
 from mangum import Mangum
 from app.main import app
 

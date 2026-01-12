@@ -1,20 +1,26 @@
+"""API smoke tests for the FastAPI app."""
+
 from fastapi.testclient import TestClient
 from app.main import app
 
 client = TestClient(app)
 
+
 def test_health():
+    """Ensure the health endpoint returns a basic OK payload."""
     r = client.get("/health")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
 
+
 def test_create_brief_paste_mock():
+    """Verify paste mode can create a brief without API keys."""
     payload = {
         "source_type": "paste",
         "source": "This is a long thread. " * 50,
         "mode": "insights",
         "length": "brief",
-        "output_language": "en"
+        "output_language": "en",
     }
     r = client.post("/v1/briefs", json=payload)
     assert r.status_code == 200

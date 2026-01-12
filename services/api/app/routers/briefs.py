@@ -1,8 +1,10 @@
+"""Brief creation and retrieval HTTP endpoints."""
+
 from fastapi import APIRouter, HTTPException, Request
 from datetime import datetime, timezone
 from nanoid import generate
 
-from app.models import CreateBriefRequest, BriefMeta
+from app.models import CreateBriefRequest, BriefMeta, Brief
 from app.settings import settings
 from app.storage import memory_store
 from app.utils import is_probably_youtube_url, clean_pasted_text
@@ -14,15 +16,36 @@ router = APIRouter()
 
 ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
+
 def day_key_utc() -> str:
+    """Return the current UTC date key used for rate limiting."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
+
 def client_ip(request: Request) -> str:
+    """Extract a best-effort client IP from request headers."""
     # best-effort; behind proxies you'd use X-Forwarded-For
     return request.headers.get("x-forwarded-for", "").split(",")[0].strip() or request.client.host
 
-@router.post("/briefs")
+
+@router.post("/briefs", response_model=Brief)
 async def create_brief(payload: CreateBriefRequest, request: Request):
+    """Create a brief from a YouTube URL or pasted text.
+
+    Applies a per-IP daily rate limit, resolves the input content (either a
+    transcript or cleaned paste), generates a prompt, and parses the LLM output
+    into a structured Brief response that is stored in memory.
+
+    Args:
+        payload: Request body describing the source and output options.
+        request: FastAPI request for rate limiting context.
+
+    Returns:
+        Fully parsed Brief object.
+
+    Raises:
+        HTTPException: When validation, rate limits, or transcript retrieval fails.
+    """
     ip = client_ip(request)
     dk = day_key_utc()
     current = memory_store.get_rate(ip, dk)
@@ -68,8 +91,10 @@ async def create_brief(payload: CreateBriefRequest, request: Request):
 
     return brief
 
-@router.get("/briefs/{brief_id}")
+
+@router.get("/briefs/{brief_id}", response_model=Brief)
 def get_brief(brief_id: str):
+    """Return a previously generated brief by id."""
     brief = memory_store.get_brief(brief_id)
     if not brief:
         raise HTTPException(status_code=404, detail="Brief not found.")

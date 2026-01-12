@@ -1,14 +1,20 @@
+"""Small text and URL helpers used across the API."""
+
 import re
 from urllib.parse import urlparse, parse_qs
 
+
 def is_probably_youtube_url(url: str) -> bool:
+    """Check whether a string looks like a YouTube URL."""
     try:
         u = urlparse(url)
         return u.netloc.endswith("youtube.com") or u.netloc.endswith("youtu.be")
     except Exception:
         return False
 
+
 def extract_youtube_video_id(url: str) -> str | None:
+    """Extract a YouTube video ID from common URL shapes."""
     u = urlparse(url)
     if u.netloc.endswith("youtu.be"):
         vid = u.path.strip("/")
@@ -23,7 +29,9 @@ def extract_youtube_video_id(url: str) -> str | None:
             return m.group(1)
     return None
 
+
 def clean_pasted_text(text: str) -> str:
+    """Normalize pasted thread text by removing common UI noise."""
     # Basic cleanup: remove repeated whitespace, "see more", timestamps-ish fragments.
     t = text.replace("\r", "\n")
     t = re.sub(r"\n{3,}", "\n\n", t)

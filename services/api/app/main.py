@@ -1,3 +1,5 @@
+"""FastAPI application setup and health endpoint."""
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -21,6 +23,8 @@ app.add_middleware(
 
 app.include_router(briefs_router, prefix="/v1", tags=["briefs"])
 
+
 @app.get("/health")
 def health():
+    """Return a simple health payload for uptime checks."""
     return {"status": "ok", "env": settings.app_env}

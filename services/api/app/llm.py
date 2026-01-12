@@ -1,3 +1,5 @@
+"""LLM prompt construction and response generation helpers."""
+
 import hashlib
 import json
 import httpx
@@ -5,14 +7,33 @@ from app.models import ModeType, LengthType
 
 GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
+
 def _length_guidance(length: LengthType) -> str:
+    """Map length choices to concise guidance."""
     if length == "tldr":
         return "3-5 bullets, very concise."
     if length == "detailed":
         return "8-12 bullets, include a little extra context per bullet."
     return "5-8 bullets, concise but useful."
 
+
 def build_prompt(source_type: str, content: str, mode: ModeType, length: LengthType, output_language: str) -> str:
+    """Build the strict prompt used to generate a brief.
+
+    The prompt includes explicit output formatting instructions so the parser
+    can reliably extract the title, overview, bullet list, and optional
+    "WhyItMatters" section.
+
+    Args:
+        source_type: Input type such as "youtube" or "paste".
+        content: Transcript or pasted text to summarize.
+        mode: Summary vs insights mode.
+        length: Target output length bucket.
+        output_language: Language code for the output.
+
+    Returns:
+        Fully rendered prompt string.
+    """
     mode_hint = "Extract the most important insights (signal over noise)." if mode == "insights" else "Summarize what was said accurately."
     guidance = _length_guidance(length)
     return f"""You are ThreadBrief, a tool that produces structured briefs.
@@ -37,7 +58,20 @@ CONTENT:
 {content}
 """
 
+
 async def generate_brief_gemini(api_key: str, prompt: str) -> str:
+    """Call Gemini to generate a brief from the prompt.
+
+    Args:
+        api_key: Gemini API key.
+        prompt: Fully constructed prompt text.
+
+    Returns:
+        The raw model text, or a JSON payload if parsing fails.
+
+    Raises:
+        httpx.HTTPError: If the Gemini request fails.
+    """
     headers = {"Content-Type": "application/json"}
     payload = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
@@ -54,7 +88,9 @@ async def generate_brief_gemini(api_key: str, prompt: str) -> str:
         except Exception:
             return json.dumps(data)
 
+
 def mock_brief(prompt: str) -> str:
+    """Return deterministic mock output for local dev without API keys."""
     # Deterministic mock for dev (no keys). Uses hash to vary slightly.
     h = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:6]
     return f"""Title: Demo Brief {h}
