@@ -16,4 +16,5 @@
 
 ## How to test
 - API unit tests: `cd services/api && pytest`
+- YouTube integration test: `sh bin/tools.sh dev test-youtube` (requires network + ffmpeg/whisper in Docker)
 - Lint: `ruff check services/api`

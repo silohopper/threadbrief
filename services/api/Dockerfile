@@ -10,6 +10,16 @@ RUN pip install --no-cache-dir --upgrade pip
 
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
+ARG WHISPER_MODEL=base
+ENV WHISPER_MODEL=${WHISPER_MODEL}
+RUN python - <<'PY'
+import os
+import whisper
+
+model = os.getenv("WHISPER_MODEL", "base")
+whisper.load_model(model)
+print(f"Whisper model cached: {model}")
+PY
 
 COPY app /app/app
 

@@ -133,6 +133,7 @@ sh bin/tools.sh dev logs api
 sh bin/tools.sh dev shell web     # shell into container
 sh bin/tools.sh dev shell api
 sh bin/tools.sh dev test          # run api tests
+sh bin/tools.sh dev test-youtube  # run YouTube integration test
 sh bin/tools.sh dev lint          # lint (web + api)
 ```
 

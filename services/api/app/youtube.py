@@ -36,6 +36,7 @@ def _resolve_executable(name: str, env_var: str | None = None) -> str | None:
 
 def _download_youtube_audio(url: str, workdir: str) -> Path:
     """Download YouTube audio to a local file using yt-dlp/youtube-dl."""
+    logger.info("Downloading YouTube audio via yt-dlp/youtube-dl.")
     ytdlp = _resolve_executable("yt-dlp", "YTDLP_PATH") or _resolve_executable(
         "youtube-dl",
         "YOUTUBEDL_PATH",
@@ -64,11 +65,14 @@ def _download_youtube_audio(url: str, workdir: str) -> Path:
     candidates = list(Path(workdir).glob("audio.*"))
     if not candidates:
         raise TranscriptError("yt-dlp completed but no audio file was produced.")
-    return max(candidates, key=lambda path: path.stat().st_size)
+    audio_path = max(candidates, key=lambda path: path.stat().st_size)
+    logger.info("Downloaded audio file: %s", audio_path.name)
+    return audio_path
 
 
 def _transcribe_audio(audio_path: Path) -> str:
     """Transcribe an audio file using the Whisper CLI."""
+    logger.info("Starting Whisper transcription with model=%s.", os.getenv("WHISPER_MODEL", "base"))
     whisper = _resolve_executable("whisper", "WHISPER_PATH")
     if not whisper:
         raise TranscriptError("Whisper CLI not found. Install openai-whisper to enable audio transcription.")
@@ -108,7 +112,9 @@ def _transcribe_audio(audio_path: Path) -> str:
             raise TranscriptError("Whisper finished but no transcript file was produced.")
         transcript_path = txt_files[0]
 
-    return transcript_path.read_text(encoding="utf-8").strip()
+    text = transcript_path.read_text(encoding="utf-8").strip()
+    logger.info("Whisper transcript length=%s chars.", len(text))
+    return text
 
 
 def _transcribe_youtube_audio(url: str) -> str:
@@ -120,6 +126,7 @@ def _transcribe_youtube_audio(url: str) -> str:
 
 def _fallback_to_audio_transcription(url: str, reason: str) -> str:
     """Try audio transcription fallback and wrap errors with context."""
+    logger.info("Falling back to audio transcription: %s", reason)
     try:
         return _transcribe_youtube_audio(url)
     except TranscriptError as exc:

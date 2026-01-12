@@ -61,6 +61,7 @@ COMMANDS (dev)
   ps                docker compose ps
   lint              lint web + api
   test              run api tests
+  test-youtube      run YouTube integration test (requires network)
   format            format web + api
   build             build web + api images
 
@@ -146,6 +147,10 @@ case "$CMD" in
   test)
     echo "[DEV] Running API tests..."
     compose dev exec -T api sh -lc "pytest -q"
+    ;;
+  test-youtube)
+    echo "[DEV] Running YouTube integration test..."
+    compose dev exec -T api sh -lc "YOUTUBE_INTEGRATION=1 pytest -q -k youtube -s"
     ;;
   build)
     echo "[DEV] Building images..."
