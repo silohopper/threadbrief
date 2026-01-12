@@ -193,13 +193,18 @@ def fetch_youtube_transcript(url: str) -> str:
 
         cause = getattr(e, "cause", None)
         resp = getattr(cause, "response", None) if cause else None
+        body_snippet = None
+        if resp is not None and hasattr(resp, "text"):
+            body_snippet = resp.text[:200]
+        elif isinstance(raw_body, str):
+            body_snippet = raw_body[:200]
         logger.exception(
             "Transcript fetch failed for video_id=%s err_type=%s cause_type=%s status=%s body_snippet=%s transcript_url=%s raw_len=%s",
             vid,
             e.__class__.__name__,
             cause.__class__.__name__ if cause else None,
             getattr(resp, "status_code", None),
-            (resp.text[:200] if hasattr(resp, "text") else (raw_body[:200] if isinstance(raw_body, str) else None)),
+            body_snippet,
             transcript_url,
             len(raw_body) if isinstance(raw_body, str) else None,
         )

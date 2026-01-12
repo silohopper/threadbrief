@@ -101,8 +101,7 @@ export default function BriefPage({ params }: { params: { id: string } }) {
 
 ${brief.overview}
 
-${brief.bullets.map((x) => `- ${x}`).join("
-")}${
+${brief.bullets.map((x) => `- ${x}`).join("\n")}${
                       brief.why_it_matters ? `
 
 Why it matters:

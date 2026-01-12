@@ -18,7 +18,7 @@ export default function AboutPage() {
             Phase 0 limitations
           </Typography>
           <Typography variant="body1" color="text.secondary">
-            YouTube transcripts are best-effort. If a transcript isn't available, use Paste mode.
+            YouTube transcripts are best-effort. If a transcript is not available, use Paste mode.
             Twitter/LinkedIn auto-fetch is intentionally not in v1.
           </Typography>
         </Card>

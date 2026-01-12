@@ -25,7 +25,8 @@ def day_key_utc() -> str:
 def client_ip(request: Request) -> str:
     """Extract a best-effort client IP from request headers."""
     # best-effort; behind proxies you'd use X-Forwarded-For
-    return request.headers.get("x-forwarded-for", "").split(",")[0].strip() or request.client.host
+    client_host = request.client.host if request.client else ""
+    return request.headers.get("x-forwarded-for", "").split(",")[0].strip() or client_host
 
 
 @router.post("/briefs", response_model=Brief)
