@@ -10,6 +10,8 @@ RUN pip install --no-cache-dir --upgrade pip
 
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements-whisper.txt /app/requirements-whisper.txt
+RUN pip install --no-cache-dir -r requirements-whisper.txt
 ARG WHISPER_MODEL=base
 ENV WHISPER_MODEL=${WHISPER_MODEL}
 RUN python - <<'PY'

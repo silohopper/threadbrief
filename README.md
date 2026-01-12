@@ -141,6 +141,19 @@ sh bin/tools.sh dev lint          # lint (web + api)
 
 ## API (Phase 0)
 
+### Optional: YouTube audio fallback (local Whisper)
+YouTube transcripts use YouTube captions first. If none exist, the API falls back
+to downloading audio with `yt-dlp` and transcribing locally with the Whisper CLI.
+
+Environment variables (optional):
+- `WHISPER_PATH` (override path to `whisper` binary)
+- `WHISPER_MODEL` (default: `base`)
+- `WHISPER_LANGUAGE` (default: `en`)
+- `YTDLP_PATH` / `YOUTUBEDL_PATH` (override downloader path)
+
+Note: the Whisper dependency is intentionally excluded from CI installs. It is
+installed in Docker via `services/api/requirements-whisper.txt`.
+
 ### POST `/v1/briefs`
 
 Request:
