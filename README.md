@@ -17,6 +17,7 @@ This repo is a **demo-first** proof-of-work project:
 - Cheap to run
 - Easy to deploy/teardown in AWS
 - Designed to be a portfolio-quality cloud deployment
+- Reusable as a scaffolding for future projects with a frontend and fastapi.
 
 ---
 
