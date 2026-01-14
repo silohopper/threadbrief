@@ -1,0 +1,6 @@
+env            = "stage"
+aws_region     = "ap-southeast-2"
+domain_name    = "threadbrief.com"
+web_domain     = "staging.threadbrief.com"
+api_domain     = "api.staging.threadbrief.com"
+gemini_api_key = ""

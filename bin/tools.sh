@@ -98,9 +98,20 @@ esac
 
 if [ "$ENV" != "dev" ]; then
   case "$CMD" in
-    up|down|deploy|destroy)
-      echo "[INFO] $ENV/$CMD not implemented yet (Terraform module next)."
-      echo "       Domain: threadbrief.com"
+    up)
+      echo "[$ENV] Terraform apply..."
+      terraform -chdir="$ROOT_DIR/infra/terraform" init
+      terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars"
+      exit 0
+      ;;
+    down|destroy)
+      echo "[$ENV] Terraform destroy..."
+      terraform -chdir="$ROOT_DIR/infra/terraform" init
+      terraform -chdir="$ROOT_DIR/infra/terraform" destroy -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars"
+      exit 0
+      ;;
+    deploy)
+      "$ROOT_DIR/bin/deploy-aws.sh" "$ENV"
       exit 0
       ;;
     *) echo "Unknown command for $ENV: $CMD"; help; exit 1 ;;

@@ -82,7 +82,7 @@ async def create_brief(payload: CreateBriefRequest, request: Request):
         llm_text = mock_brief(prompt)
 
     brief_id = generate(size=6, alphabet=ALPHABET)
-    share_url = f"http://localhost:3000/b/{brief_id}"  # web builds can overwrite base; UI uses its own base
+    share_url = f"{settings.web_base_url}/b/{brief_id}"
 
     brief = parse_llm_text(llm_text, brief_id=brief_id, share_url=share_url, meta=meta)
 
