@@ -138,6 +138,10 @@ sh bin/tools.sh dev test-gemini   # run Gemini integration test
 sh bin/tools.sh dev lint          # lint (web + api)
 ```
 
+## Deploy (AWS)
+Deployment scripts and Terraform live in `infra/`. See `infra/README.md` for the
+exact staging/prod steps.
+
 ---
 
 ## API (Phase 0)
