@@ -95,8 +95,8 @@ Python API that:
   - Tooling metadata (formatting/lint/test configuration, packaging hints). If you standardize on one dependency system later, this can become the source of truth.
 
 - **`services/api/handler.py`**
-  - AWS Lambda entrypoint using `Mangum`.
-  - Wraps FastAPI app so API Gateway/Lambda proxy can invoke it.
+  - Optional AWS Lambda entrypoint using `Mangum`.
+  - Unused in current ECS Fargate deployments.
 
 ### Application code (`services/api/app/`)
 

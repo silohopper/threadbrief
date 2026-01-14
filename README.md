@@ -74,7 +74,7 @@ The UI is designed with MUI components and a centered layout that scales down cl
 
 ### Backend
 - FastAPI (local dev)
-- Lambda-ready handler via `mangum` (same code path)
+- Deployed on ECS Fargate (Lambda handler is optional/unused)
 - Gemini API (optional; mock mode works without keys)
 - Storage: in-memory (dev) or DynamoDB (optional later)
 
@@ -98,7 +98,7 @@ The UI is designed with MUI components and a centered layout that scales down cl
 │  └─ prod/
 ├─ services/
 │  ├─ web/          # Next.js app
-│  └─ api/          # FastAPI + Lambda handler
+│  └─ api/          # FastAPI API service
 └─ README.md
 ```
 
@@ -139,8 +139,10 @@ sh bin/tools.sh dev lint          # lint (web + api)
 ```
 
 ## Deploy (AWS)
-Deployment scripts and Terraform live in `infra/`. See `infra/README.md` for the
-exact staging/prod steps.
+Deployment scripts and Terraform live in `infra/`. See [infra/README.md](infra/README.md)
+for the exact staging/prod steps.
+That guide includes a suggested IAM policy if you want tighter permissions than
+`AdministratorAccess`.
 
 ---
 

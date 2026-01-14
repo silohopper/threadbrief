@@ -104,6 +104,10 @@ if [ "$ENV" != "dev" ]; then
       terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars"
       exit 0
       ;;
+    dns)
+      terraform -chdir="$ROOT_DIR/infra/terraform" output route53_name_servers
+      exit 0
+      ;;
     down|destroy)
       echo "[$ENV] Terraform destroy..."
       terraform -chdir="$ROOT_DIR/infra/terraform" init
