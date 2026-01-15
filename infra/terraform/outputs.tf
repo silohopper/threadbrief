@@ -8,6 +8,17 @@ output "route53_name_servers" {
   description = "Route53 name servers to set in GoDaddy."
 }
 
+output "acm_validation_records" {
+  value = [
+    for dvo in aws_acm_certificate.this.domain_validation_options : {
+      name  = dvo.resource_record_name
+      type  = dvo.resource_record_type
+      value = dvo.resource_record_value
+    }
+  ]
+  description = "ACM DNS validation records (for GoDaddy DNS)."
+}
+
 output "api_ecr_url" {
   value       = aws_ecr_repository.api.repository_url
   description = "API ECR repository URL."

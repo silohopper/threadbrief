@@ -170,6 +170,10 @@ resource "aws_secretsmanager_secret_version" "gemini" {
   secret_string = var.gemini_api_key
 }
 
+resource "aws_iam_service_linked_role" "ecs" {
+  aws_service_name = "ecs.amazonaws.com"
+}
+
 resource "aws_ecs_task_definition" "api" {
   family                   = "threadbrief-${var.env}-api"
   network_mode             = "awsvpc"
@@ -368,7 +372,7 @@ resource "aws_ecs_service" "api" {
     container_name   = "api"
     container_port   = 8080
   }
-  depends_on = [aws_lb_listener.https]
+  depends_on = [aws_lb_listener.https, aws_iam_service_linked_role.ecs]
 }
 
 resource "aws_ecs_service" "web" {
@@ -387,7 +391,7 @@ resource "aws_ecs_service" "web" {
     container_name   = "web"
     container_port   = 3000
   }
-  depends_on = [aws_lb_listener.https]
+  depends_on = [aws_lb_listener.https, aws_iam_service_linked_role.ecs]
 }
 
 resource "aws_route53_record" "web" {

@@ -84,6 +84,7 @@ script without granting full admin access.
         "iam:GetRolePolicy",
         "iam:ListRolePolicies",
         "iam:ListAttachedRolePolicies",
+        "iam:CreateServiceLinkedRole"
         "logs:*",
         "route53:*",
         "secretsmanager:*",
@@ -124,9 +125,31 @@ to point your domain to those name servers.
 Terraform will keep waiting at the ACM validation step until DNS is updated and
 propagated.
 
+If you cannot change nameservers (staying on GoDaddy DNS), you must add the ACM
+validation CNAMEs manually. This command will create the ACM certificate (if
+needed) and print the CNAMEs to add in GoDaddy:
+```bash
+sh bin/tools.sh stage cert
+```
+Add each record to GoDaddy DNS exactly as shown (Name/Type/Value).
+
+After adding the CNAMEs in GoDaddy, re-run:
+```bash
+sh bin/tools.sh stage up
+```
+
 ## Step 8) Wait for SSL to validate (ACM)
 ACM is AWS Certificate Manager. It issues your SSL certs for HTTPS.
 Once GoDaddy is pointing at Route53, ACM will validate automatically.
+
+How to check ACM:
+1) AWS Console → **ACM** → Certificates.
+2) Open the cert and look for **Status: Issued**.
+3) Under **Domains**, you should see **two entries**:
+   - one for `staging.threadbrief.com`
+   - one for `api.staging.threadbrief.com`
+4) Each domain should show **Success** (validation complete).
+If one is missing, DNS is not fully propagated or the record is missing.
 
 ## Step 9) Deploy containers
 This builds Docker images, pushes them to ECR, then restarts ECS services.
@@ -166,3 +189,9 @@ or use the console to delete the specific resource.
 ## Notes
 - Images are pushed to ECR with tag `latest` by default (override with `TAG=...`).
 - `GEMINI_API_KEY` is stored in Secrets Manager if provided via tfvars.
+
+## Cost control ideas
+- **Scale ECS to zero** for staging when idle (manual or scheduled).
+- Use smaller task sizes for stage if performance allows.
+- Serve the web UI from S3 + CloudFront (static) instead of Fargate.
+- Keep ACM (free) and Route53 (low cost) as-is.

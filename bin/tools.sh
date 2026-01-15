@@ -76,6 +76,10 @@ EXAMPLES
   sh bin/tools.sh dev up
   sh bin/tools.sh dev logs api
   sh bin/tools.sh dev shell web
+  sh bin/tools.sh stage up
+  sh bin/tools.sh stage dns
+  sh bin/tools.sh stage deploy
+  sh bin/tools.sh stage down
 EOF
 }
 
@@ -106,6 +110,16 @@ if [ "$ENV" != "dev" ]; then
       ;;
     dns)
       terraform -chdir="$ROOT_DIR/infra/terraform" output route53_name_servers
+      exit 0
+      ;;
+    cert)
+      terraform -chdir="$ROOT_DIR/infra/terraform" init
+      if ! terraform -chdir="$ROOT_DIR/infra/terraform" output acm_validation_records >/dev/null 2>&1; then
+        terraform -chdir="$ROOT_DIR/infra/terraform" apply \
+          -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" \
+          -target=aws_acm_certificate.this
+      fi
+      terraform -chdir="$ROOT_DIR/infra/terraform" output acm_validation_records
       exit 0
       ;;
     down|destroy)
