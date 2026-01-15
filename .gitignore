@@ -10,4 +10,5 @@ terraform.tfstate
 terraform.tfstate.*
 *.tfstate
 *.tfstate.*
+infra/terraform/envs/*.local.tfvars
 .DS_Store

@@ -157,6 +157,7 @@ Environment variables (optional):
 - `WHISPER_MODEL` (default: `base`)
 - `WHISPER_LANGUAGE` (default: `en`)
 - `YTDLP_PATH` / `YOUTUBEDL_PATH` (override downloader path)
+- `YTDLP_ARGS` (extra yt-dlp args, e.g. `--js-runtimes node`)
 
 Note: the Whisper dependency is intentionally excluded from CI installs. It is
 installed in Docker via `services/api/requirements-whisper.txt`.

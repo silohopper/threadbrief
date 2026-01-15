@@ -49,6 +49,12 @@ variable "gemini_endpoint" {
   default     = ""
 }
 
+variable "ytdlp_args" {
+  type        = string
+  description = "Optional yt-dlp args (e.g. --js-runtimes node)."
+  default     = "--js-runtimes node"
+}
+
 variable "cors_origins" {
   type        = string
   description = "CORS origins for the API."

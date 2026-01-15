@@ -22,7 +22,8 @@ locals {
       { name = "CORS_ORIGINS", value = local.cors_origins },
       { name = "WEB_BASE_URL", value = local.web_base_url }
     ],
-    var.gemini_endpoint != "" ? [{ name = "GEMINI_ENDPOINT", value = var.gemini_endpoint }] : []
+    var.gemini_endpoint != "" ? [{ name = "GEMINI_ENDPOINT", value = var.gemini_endpoint }] : [],
+    var.ytdlp_args != "" ? [{ name = "YTDLP_ARGS", value = var.ytdlp_args }] : []
   )
   api_secrets = local.gemini_secret != null ? [{ name = "GEMINI_API_KEY", valueFrom = local.gemini_secret }] : []
 }

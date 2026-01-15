@@ -56,6 +56,9 @@ def _download_youtube_audio(url: str, workdir: str) -> Path:
         output_template,
         url,
     ]
+    extra_args = os.getenv("YTDLP_ARGS", "").split()
+    if extra_args:
+        cmd.extend(extra_args)
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:

@@ -133,6 +133,13 @@ if [ "$ENV" != "dev" ]; then
       AWS_REGION="${AWS_REGION:-ap-southeast-2}"
       TAG="${TAG:-latest}"
       TF_DIR="$ROOT_DIR/infra/terraform"
+      VARS_ARGS=(-var-file="$TF_DIR/envs/$ENV.tfvars")
+      if [ -f "$TF_DIR/envs/$ENV.local.tfvars" ]; then
+        VARS_ARGS+=(-var-file="$TF_DIR/envs/$ENV.local.tfvars")
+      fi
+
+      terraform -chdir="$TF_DIR" init
+      terraform -chdir="$TF_DIR" apply "${VARS_ARGS[@]}"
 
       api_repo="$(terraform -chdir="$TF_DIR" output -raw api_ecr_url)"
       web_repo="$(terraform -chdir="$TF_DIR" output -raw web_ecr_url)"
