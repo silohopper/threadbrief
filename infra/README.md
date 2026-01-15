@@ -88,6 +88,8 @@ script without granting full admin access.
         "iam:CreatePolicy",
         "iam:DeletePolicy",
         "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListPolicyVersions",
         "iam:ListPolicies",
         "iam:AttachUserPolicy",
         "iam:DetachUserPolicy",
