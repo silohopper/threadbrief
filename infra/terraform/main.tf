@@ -16,6 +16,8 @@ locals {
   api_image     = "${aws_ecr_repository.api.repository_url}:${var.api_image_tag}"
   web_image     = "${aws_ecr_repository.web.repository_url}:${var.web_image_tag}"
   gemini_secret = length(aws_secretsmanager_secret.gemini) > 0 ? aws_secretsmanager_secret.gemini[0].arn : null
+  cookies_secret = length(aws_secretsmanager_secret.ytdlp_cookies) > 0 ? aws_secretsmanager_secret.ytdlp_cookies[0].arn : null
+  secret_arns = compact([local.gemini_secret, local.cookies_secret])
   api_env = concat(
     [
       { name = "APP_ENV", value = var.env },
@@ -25,7 +27,10 @@ locals {
     var.gemini_endpoint != "" ? [{ name = "GEMINI_ENDPOINT", value = var.gemini_endpoint }] : [],
     var.ytdlp_args != "" ? [{ name = "YTDLP_ARGS", value = var.ytdlp_args }] : []
   )
-  api_secrets = local.gemini_secret != null ? [{ name = "GEMINI_API_KEY", valueFrom = local.gemini_secret }] : []
+  api_secrets = concat(
+    local.gemini_secret != null ? [{ name = "GEMINI_API_KEY", valueFrom = local.gemini_secret }] : [],
+    local.cookies_secret != null ? [{ name = "YTDLP_COOKIES", valueFrom = local.cookies_secret }] : []
+  )
 }
 
 resource "aws_security_group" "alb" {
@@ -126,7 +131,7 @@ resource "aws_iam_role_policy_attachment" "task_execution" {
 }
 
 resource "aws_iam_policy" "secrets_read" {
-  count = var.gemini_api_key != "" ? 1 : 0
+  count = length(local.secret_arns) > 0 ? 1 : 0
   name  = "threadbrief-${var.env}-secrets-read"
   policy = jsonencode({
     Version = "2012-10-17",
@@ -134,14 +139,14 @@ resource "aws_iam_policy" "secrets_read" {
       {
         Effect   = "Allow",
         Action   = ["secretsmanager:GetSecretValue"],
-        Resource = local.gemini_secret
+        Resource = local.secret_arns
       }
     ]
   })
 }
 
 resource "aws_iam_role_policy_attachment" "task_execution_secrets" {
-  count      = var.gemini_api_key != "" ? 1 : 0
+  count      = length(local.secret_arns) > 0 ? 1 : 0
   role       = aws_iam_role.task_execution.name
   policy_arn = aws_iam_policy.secrets_read[0].arn
 }
@@ -169,6 +174,17 @@ resource "aws_secretsmanager_secret_version" "gemini" {
   count         = var.gemini_api_key != "" ? 1 : 0
   secret_id     = aws_secretsmanager_secret.gemini[0].id
   secret_string = var.gemini_api_key
+}
+
+resource "aws_secretsmanager_secret" "ytdlp_cookies" {
+  count = var.ytdlp_cookies != "" ? 1 : 0
+  name  = "threadbrief/${var.env}/ytdlp_cookies"
+}
+
+resource "aws_secretsmanager_secret_version" "ytdlp_cookies" {
+  count         = var.ytdlp_cookies != "" ? 1 : 0
+  secret_id     = aws_secretsmanager_secret.ytdlp_cookies[0].id
+  secret_string = var.ytdlp_cookies
 }
 
 resource "aws_iam_service_linked_role" "ecs" {

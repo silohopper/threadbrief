@@ -56,6 +56,11 @@ def _download_youtube_audio(url: str, workdir: str) -> Path:
         output_template,
         url,
     ]
+    cookies_text = os.getenv("YTDLP_COOKIES")
+    if cookies_text:
+        cookies_path = Path(workdir) / "cookies.txt"
+        cookies_path.write_text(cookies_text, encoding="utf-8")
+        cmd.extend(["--cookies", str(cookies_path)])
     extra_args = os.getenv("YTDLP_ARGS", "").split()
     if extra_args:
         cmd.extend(extra_args)

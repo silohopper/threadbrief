@@ -55,6 +55,13 @@ variable "ytdlp_args" {
   default     = "--js-runtimes node"
 }
 
+variable "ytdlp_cookies" {
+  type        = string
+  description = "Optional yt-dlp cookies.txt contents."
+  sensitive   = true
+  default     = ""
+}
+
 variable "cors_origins" {
   type        = string
   description = "CORS origins for the API."

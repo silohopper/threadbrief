@@ -158,9 +158,18 @@ Environment variables (optional):
 - `WHISPER_LANGUAGE` (default: `en`)
 - `YTDLP_PATH` / `YOUTUBEDL_PATH` (override downloader path)
 - `YTDLP_ARGS` (extra yt-dlp args, e.g. `--js-runtimes node`)
+- `YTDLP_COOKIES` (cookies.txt contents for YouTube bot checks)
 
 Note: the Whisper dependency is intentionally excluded from CI installs. It is
 installed in Docker via `services/api/requirements-whisper.txt`.
+
+Local dev cookies:
+- Create `env/dev/cookies.txt` (do not commit; gitignored).
+- Export YouTube cookies in Netscape format.
+- Run dev with:
+  ```
+  YTDLP_COOKIES="$(cat env/dev/cookies.txt)" sh bin/tools.sh dev restart
+  ```
 
 ### POST `/v1/briefs`
 

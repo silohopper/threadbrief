@@ -198,6 +198,19 @@ or use the console to delete the specific resource.
 - Images are pushed to ECR with tag `latest` by default (override with `TAG=...`).
 - `GEMINI_API_KEY` is stored in Secrets Manager if provided via tfvars.
 
+## Optional: YouTube cookies (for bot checks)
+If YouTube blocks downloads in staging, add cookies:
+1) Log into YouTube in your browser.
+2) Export cookies to a `cookies.txt` file (browser extension).
+3) Paste the contents into `infra/terraform/envs/stage.local.tfvars`:
+   ```
+   ytdlp_cookies = """PASTE_COOKIES_TXT_HERE"""
+   ```
+4) Re-apply and deploy:
+   ```bash
+   sh bin/tools.sh stage deploy
+   ```
+
 ## Cost control ideas
 - **Scale ECS to zero** for staging when idle (manual or scheduled).
 - Use smaller task sizes for stage if performance allows.

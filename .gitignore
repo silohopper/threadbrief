@@ -1,6 +1,7 @@
 node_modules
 .env
 .env.*
+env/dev/cookies.txt
 __pycache__
 *.pyc
 dist

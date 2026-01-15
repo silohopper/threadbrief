@@ -176,6 +176,9 @@ fi
 case "$CMD" in
   up)
     echo "[DEV] Starting containers..."
+    if [ -f "$ROOT_DIR/env/dev/cookies.txt" ]; then
+      export YTDLP_COOKIES="$(cat "$ROOT_DIR/env/dev/cookies.txt")"
+    fi
     compose dev up -d --build
     ;;
   down)
@@ -185,6 +188,9 @@ case "$CMD" in
   restart)
     echo "[DEV] Restarting containers..."
     compose dev down
+    if [ -f "$ROOT_DIR/env/dev/cookies.txt" ]; then
+      export YTDLP_COOKIES="$(cat "$ROOT_DIR/env/dev/cookies.txt")"
+    fi
     compose dev up -d --build
     ;;
   ps)
