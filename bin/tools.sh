@@ -137,6 +137,14 @@ if [ "$ENV" != "dev" ]; then
       if [ -f "$TF_DIR/envs/$ENV.local.tfvars" ]; then
         VARS_ARGS+=(-var-file="$TF_DIR/envs/$ENV.local.tfvars")
       fi
+      COOKIES_FILE="$ROOT_DIR/env/$ENV/cookies.txt"
+      if [ ! -f "$COOKIES_FILE" ]; then
+        COOKIES_FILE="$ROOT_DIR/env/dev/cookies.txt"
+      fi
+      if [ -f "$COOKIES_FILE" ]; then
+        export TF_VAR_ytdlp_cookies="$(cat "$COOKIES_FILE")"
+        VARS_ARGS+=(-var "ytdlp_cookies=$TF_VAR_ytdlp_cookies")
+      fi
 
       terraform -chdir="$TF_DIR" init
       terraform -chdir="$TF_DIR" apply "${VARS_ARGS[@]}"
