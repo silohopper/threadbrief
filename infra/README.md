@@ -86,6 +86,7 @@ script without granting full admin access.
         "iam:ListAttachedRolePolicies",
         "iam:CreateServiceLinkedRole",
         "iam:CreatePolicy",
+        "iam:CreatePolicyVersion",
         "iam:DeletePolicy",
         "iam:GetPolicy",
         "iam:GetPolicyVersion",
