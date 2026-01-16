@@ -143,6 +143,14 @@ You only do this once. Stage and prod share the same hosted zone for
 Terraform will keep waiting at the ACM validation step until DNS is updated and
 propagated.
 
+If your terminal looks like it’s “stuck” waiting for ACM validation, open a
+second terminal and run:
+```bash
+sh bin/tools.sh stage dns
+```
+Use the output to update GoDaddy nameservers, then wait for propagation so the
+original `stage up` can finish.
+
 If you cannot change nameservers (staying on GoDaddy DNS), you must add the ACM
 validation CNAMEs manually. This command will create the ACM certificate (if
 needed) and print the CNAMEs to add in GoDaddy:

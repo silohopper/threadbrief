@@ -16,7 +16,13 @@ export default function Header() {
         <Button component={Link} href="/about" color="inherit">
           About
         </Button>
-        <Button component="a" href="https://github.com/" target="_blank" rel="noreferrer" color="inherit">
+        <Button
+          component="a"
+          href="https://github.com/silohopper/threadbrief"
+          target="_blank"
+          rel="noreferrer"
+          color="inherit"
+        >
           GitHub
         </Button>
       </Toolbar>
