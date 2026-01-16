@@ -151,6 +151,14 @@ sh bin/tools.sh stage dns
 Use the output to update GoDaddy nameservers, then wait for propagation so the
 original `stage up` can finish.
 
+You’ll typically see logs like:
+```
+aws_acm_certificate_validation.this: Still creating... [8m10s elapsed]
+aws_acm_certificate_validation.this: Still creating... [8m20s elapsed]
+aws_acm_certificate_validation.this: Still creating... [8m30s elapsed]
+aws_acm_certificate_validation.this: Still creating... [8m40s elapsed]
+```
+
 If you cannot change nameservers (staying on GoDaddy DNS), you must add the ACM
 validation CNAMEs manually. This command will create the ACM certificate (if
 needed) and print the CNAMEs to add in GoDaddy:
