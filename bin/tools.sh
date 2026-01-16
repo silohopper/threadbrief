@@ -94,11 +94,10 @@ tf_init_select_workspace() {
   local tf_dir="$2"
 
   terraform -chdir="$tf_dir" init
-  if terraform -chdir="$tf_dir" workspace list | grep -Eq "^(\\* )?${env}$"; then
-    terraform -chdir="$tf_dir" workspace select "$env" >/dev/null
-  else
-    terraform -chdir="$tf_dir" workspace new "$env" >/dev/null
+  if terraform -chdir="$tf_dir" workspace select "$env" >/dev/null 2>&1; then
+    return
   fi
+  terraform -chdir="$tf_dir" workspace new "$env" >/dev/null
 }
 
 if [ -z "$ENV" ] || [ -z "$CMD" ]; then

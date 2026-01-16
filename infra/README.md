@@ -23,28 +23,8 @@ If anything is missing:
 - Docker Desktop: https://www.docker.com/products/docker-desktop/
 
 ## Important: separate Terraform state per env
-Staging and prod must not share the same Terraform state. The tooling now uses
+Staging and prod must not share the same Terraform state. The tooling uses
 Terraform workspaces (`stage`, `prod`) so resources don’t overwrite each other.
-
-### One-time migration (if you already created staging)
-If you already applied staging using the default workspace, move that state
-into the `stage` workspace before doing anything in prod:
-
-```bash
-cd infra/terraform
-terraform init
-
-# Create stage workspace (if it doesn't exist)
-terraform workspace new stage || true
-
-# Save current (default) state, then push it into the stage workspace
-terraform state pull > /tmp/threadbrief-stage.tfstate
-terraform workspace select stage
-terraform state push /tmp/threadbrief-stage.tfstate
-
-# Create an empty prod workspace
-terraform workspace new prod || true
-```
 
 From now on, use `sh bin/tools.sh stage ...` and `sh bin/tools.sh prod ...` only.
 
