@@ -71,6 +71,9 @@ COMMANDS (stage/prod)
   down              placeholder (Terraform coming next)
   deploy            placeholder
   destroy           placeholder
+  unlock <lock_id>  force-unlock Terraform state
+  logs <svc>        tail CloudWatch logs (api|web)
+  elb               show ELB + target health info
 
 EXAMPLES
   sh bin/tools.sh dev up
@@ -80,6 +83,9 @@ EXAMPLES
   sh bin/tools.sh stage dns
   sh bin/tools.sh stage deploy
   sh bin/tools.sh stage down
+  sh bin/tools.sh stage unlock <lock_id>
+  sh bin/tools.sh stage logs api
+  sh bin/tools.sh stage elb
 EOF
 }
 
@@ -126,6 +132,44 @@ if [ "$ENV" != "dev" ]; then
       echo "[$ENV] Terraform destroy..."
       terraform -chdir="$ROOT_DIR/infra/terraform" init
       terraform -chdir="$ROOT_DIR/infra/terraform" destroy -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars"
+      exit 0
+      ;;
+    unlock)
+      if [ -z "${ARG:-}" ]; then
+        echo "Missing lock id for unlock."
+        exit 1
+      fi
+      terraform -chdir="$ROOT_DIR/infra/terraform" force-unlock "$ARG"
+      exit 0
+      ;;
+    logs)
+      if [ -z "${ARG:-}" ]; then
+        echo "Missing service for logs (api|web)."
+        exit 1
+      fi
+      if [ "$ARG" != "api" ] && [ "$ARG" != "web" ]; then
+        echo "Unknown service for logs: $ARG (expected api|web)."
+        exit 1
+      fi
+      aws logs tail "/ecs/threadbrief/$ENV/$ARG" --since 10m
+      exit 0
+      ;;
+    elb)
+      lb_name="threadbrief-$ENV"
+      lb_arn="$(aws elbv2 describe-load-balancers --names "$lb_name" --query "LoadBalancers[0].LoadBalancerArn" --output text)"
+      echo "Load balancer: $lb_name"
+      echo "ARN: $lb_arn"
+      aws elbv2 describe-load-balancer-attributes \
+        --load-balancer-arn "$lb_arn" \
+        --query "Attributes[?Key=='idle_timeout.timeout_seconds']"
+      aws elbv2 describe-listeners --load-balancer-arn "$lb_arn" \
+        --query "Listeners[].{Port:Port,Protocol:Protocol,Default:DefaultActions[0].Type}"
+      api_tg="$(aws elbv2 describe-target-groups --names "threadbrief-$ENV-api" --query "TargetGroups[0].TargetGroupArn" --output text)"
+      web_tg="$(aws elbv2 describe-target-groups --names "threadbrief-$ENV-web" --query "TargetGroups[0].TargetGroupArn" --output text)"
+      echo "API target group: $api_tg"
+      aws elbv2 describe-target-health --target-group-arn "$api_tg"
+      echo "WEB target group: $web_tg"
+      aws elbv2 describe-target-health --target-group-arn "$web_tg"
       exit 0
       ;;
     deploy)

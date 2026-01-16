@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from urllib.parse import quote
 from xml.etree.ElementTree import ParseError
 
 from youtube_transcript_api import (
@@ -32,7 +33,9 @@ def _normalize_proxy(proxy_url: str) -> str:
     parts = proxy_url.split(":")
     if len(parts) == 4:
         host, port, user, password = parts
-        return f"http://{user}:{password}@{host}:{port}"
+        safe_user = quote(user, safe="")
+        safe_password = quote(password, safe="")
+        return f"http://{safe_user}:{safe_password}@{host}:{port}"
     return proxy_url
 
 

@@ -159,6 +159,15 @@ Environment variables (optional):
 - `YTDLP_PATH` / `YOUTUBEDL_PATH` (override downloader path)
 - `YTDLP_ARGS` (extra yt-dlp args, e.g. `--js-runtimes node`)
 - `YTDLP_COOKIES` (cookies.txt contents for YouTube bot checks)
+- `YTDLP_PROXY` (optional proxy URL or host:port:user:pass)
+
+### Timeouts
+The YouTube fallback can take a while (yt-dlp + Whisper). These are the current
+timeouts and where to change them:
+- Frontend request timeout: `services/web/app/page.tsx` (currently 180s)
+- API yt-dlp timeout: `YTDLP_TIMEOUT_SECONDS` (default 300s)
+- API Whisper timeout: `WHISPER_TIMEOUT_SECONDS` (default 300s)
+- ALB idle timeout: `infra/terraform/main.tf` (`idle_timeout = 300`)
 
 Note: the Whisper dependency is intentionally excluded from CI installs. It is
 installed in Docker via `services/api/requirements-whisper.txt`.
