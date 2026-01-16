@@ -143,6 +143,10 @@ if [ "$ENV" != "dev" ]; then
     up)
       echo "[$ENV] Terraform apply..."
       tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
+      if [ "$ENV" != "prod" ]; then
+        slr_arn="arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS"
+        terraform -chdir="$ROOT_DIR/infra/terraform" import -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" aws_iam_service_linked_role.ecs "$slr_arn" >/dev/null 2>&1 || true
+      fi
       if [ "${RESYNC:-}" = "1" ]; then
         echo "[$ENV] Resyncing existing resources into state..."
         tf_resync_state "$ENV" "$ROOT_DIR/infra/terraform"
@@ -172,6 +176,17 @@ if [ "$ENV" != "dev" ]; then
     down|destroy)
       echo "[$ENV] Terraform destroy..."
       tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
+      AWS_REGION="${AWS_REGION:-ap-southeast-2}"
+      ecr_targets=()
+      if aws ecr describe-repositories --region "$AWS_REGION" --repository-names "threadbrief-$ENV-api" >/dev/null 2>&1; then
+        ecr_targets+=(-target=aws_ecr_repository.api)
+      fi
+      if aws ecr describe-repositories --region "$AWS_REGION" --repository-names "threadbrief-$ENV-web" >/dev/null 2>&1; then
+        ecr_targets+=(-target=aws_ecr_repository.web)
+      fi
+      if [ "${#ecr_targets[@]}" -gt 0 ]; then
+        terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" "${ecr_targets[@]}" -auto-approve
+      fi
       if [ "$ENV" != "prod" ]; then
         terraform -chdir="$ROOT_DIR/infra/terraform" state rm aws_iam_service_linked_role.ecs >/dev/null 2>&1 || true
       fi

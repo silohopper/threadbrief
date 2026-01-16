@@ -1,0 +1,455 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Threadbrief stack (CloudFormation sketch based on Terraform)
+
+Parameters:
+  Env:
+    Type: String
+    Default: stage
+  AwsRegion:
+    Type: String
+    Default: ap-southeast-2
+  DomainName:
+    Type: String
+    Default: threadbrief.com
+  WebDomain:
+    Type: String
+    Default: staging.threadbrief.com
+  ApiDomain:
+    Type: String
+    Default: api.staging.threadbrief.com
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC for ALB/ECS.
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets for ALB/ECS.
+  ApiImageTag:
+    Type: String
+    Default: latest
+  WebImageTag:
+    Type: String
+    Default: latest
+  CorsOrigins:
+    Type: String
+    Default: ""
+  WebBaseUrl:
+    Type: String
+    Default: ""
+  GeminiApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+  GeminiEndpoint:
+    Type: String
+    Default: ""
+  YtdlpArgs:
+    Type: String
+    Default: "--js-runtimes node"
+  YtdlpCookies:
+    Type: String
+    Default: ""
+    NoEcho: true
+  YtdlpProxy:
+    Type: String
+    Default: ""
+    NoEcho: true
+
+Conditions:
+  HasCorsOrigins: !Not [!Equals [!Ref CorsOrigins, ""]]
+  HasWebBaseUrl: !Not [!Equals [!Ref WebBaseUrl, ""]]
+  HasGeminiKey: !Not [!Equals [!Ref GeminiApiKey, ""]]
+  HasGeminiEndpoint: !Not [!Equals [!Ref GeminiEndpoint, ""]]
+  HasYtdlpCookies: !Not [!Equals [!Ref YtdlpCookies, ""]]
+  HasYtdlpProxy: !Not [!Equals [!Ref YtdlpProxy, ""]]
+  HasAnySecrets: !Or
+    - !Condition HasGeminiKey
+    - !Condition HasYtdlpCookies
+    - !Condition HasYtdlpProxy
+
+Resources:
+  ApiRepo:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Delete
+    Properties:
+      RepositoryName: !Sub threadbrief-${Env}-api
+      ImageTagMutability: MUTABLE
+
+  WebRepo:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Delete
+    Properties:
+      RepositoryName: !Sub threadbrief-${Env}-web
+      ImageTagMutability: MUTABLE
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/threadbrief/${Env}/api
+      RetentionInDays: 14
+
+  WebLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/threadbrief/${Env}/web
+      RetentionInDays: 14
+
+  AlbSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB ingress
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  EcsSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS ingress from ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref AlbSg
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId: !Ref AlbSg
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub threadbrief-${Env}
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub threadbrief-${Env}-task-exec
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub threadbrief-${Env}-task
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+
+  SecretsReadPolicy:
+    Condition: HasAnySecrets
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub threadbrief-${Env}-secrets-read
+      Roles:
+        - !Ref TaskExecutionRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:threadbrief/${Env}/*
+
+  GeminiSecret:
+    Condition: HasGeminiKey
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub threadbrief/${Env}/gemini_api_key
+      SecretString: !Ref GeminiApiKey
+
+  YtdlpCookiesSecret:
+    Condition: HasYtdlpCookies
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub threadbrief/${Env}/ytdlp_cookies
+      SecretString: !Ref YtdlpCookies
+
+  YtdlpProxySecret:
+    Condition: HasYtdlpProxy
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub threadbrief/${Env}/ytdlp_proxy
+      SecretString: !Ref YtdlpProxy
+
+  ApiTaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub threadbrief-${Env}-api
+      RequiresCompatibilities: ["FARGATE"]
+      NetworkMode: awsvpc
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: api
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/threadbrief-${Env}-api:${ApiImageTag}
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: APP_ENV
+              Value: !Ref Env
+            - Name: CORS_ORIGINS
+              Value: !If [HasCorsOrigins, !Ref CorsOrigins, !Sub "https://${WebDomain}"]
+            - Name: WEB_BASE_URL
+              Value: !If [HasWebBaseUrl, !Ref WebBaseUrl, !Sub "https://${WebDomain}"]
+            - Name: YTDLP_ARGS
+              Value: !Ref YtdlpArgs
+            - !If
+              - HasGeminiEndpoint
+              - { Name: GEMINI_ENDPOINT, Value: !Ref GeminiEndpoint }
+              - !Ref AWS::NoValue
+          Secrets:
+            - !If
+              - HasGeminiKey
+              - { Name: GEMINI_API_KEY, ValueFrom: !Ref GeminiSecret }
+              - !Ref AWS::NoValue
+            - !If
+              - HasYtdlpCookies
+              - { Name: YTDLP_COOKIES, ValueFrom: !Ref YtdlpCookiesSecret }
+              - !Ref AWS::NoValue
+            - !If
+              - HasYtdlpProxy
+              - { Name: YTDLP_PROXY, ValueFrom: !Ref YtdlpProxySecret }
+              - !Ref AWS::NoValue
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ApiLogGroup
+              awslogs-region: !Ref AwsRegion
+              awslogs-stream-prefix: api
+
+  WebTaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub threadbrief-${Env}-web
+      RequiresCompatibilities: ["FARGATE"]
+      NetworkMode: awsvpc
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: web
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/threadbrief-${Env}-web:${WebImageTag}
+          Essential: true
+          PortMappings:
+            - ContainerPort: 3000
+              Protocol: tcp
+          Environment:
+            - Name: NEXT_PUBLIC_API_BASE_URL
+              Value: !Sub "https://${ApiDomain}"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref WebLogGroup
+              awslogs-region: !Ref AwsRegion
+              awslogs-stream-prefix: web
+
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub threadbrief-${Env}
+      Type: application
+      SecurityGroups: [!Ref AlbSg]
+      Subnets: !Ref SubnetIds
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: "300"
+
+  ApiTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub threadbrief-${Env}-api
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 20
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: 200
+
+  WebTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub threadbrief-${Env}-web
+      Port: 3000
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 20
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: 200-399
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: "443"
+            StatusCode: HTTP_301
+
+  HostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Ref DomainName
+
+  Cert:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref WebDomain
+      SubjectAlternativeNames:
+        - !Ref ApiDomain
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref WebDomain
+          HostedZoneId: !Ref HostedZone
+        - DomainName: !Ref ApiDomain
+          HostedZoneId: !Ref HostedZone
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-2016-08
+      Certificates:
+        - CertificateArn: !Ref Cert
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WebTargetGroup
+
+  ApiRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HttpsListener
+      Priority: 10
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: [!Ref ApiDomain]
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ApiTargetGroup
+
+  WebRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HttpsListener
+      Priority: 20
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: [!Ref WebDomain]
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref WebTargetGroup
+
+  ApiService:
+    Type: AWS::ECS::Service
+    DependsOn: HttpsListener
+    Properties:
+      Cluster: !Ref Cluster
+      LaunchType: FARGATE
+      DesiredCount: 1
+      TaskDefinition: !Ref ApiTaskDef
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets: !Ref SubnetIds
+          SecurityGroups: [!Ref EcsSg]
+      LoadBalancers:
+        - ContainerName: api
+          ContainerPort: 8080
+          TargetGroupArn: !Ref ApiTargetGroup
+
+  WebService:
+    Type: AWS::ECS::Service
+    DependsOn: HttpsListener
+    Properties:
+      Cluster: !Ref Cluster
+      LaunchType: FARGATE
+      DesiredCount: 1
+      TaskDefinition: !Ref WebTaskDef
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets: !Ref SubnetIds
+          SecurityGroups: [!Ref EcsSg]
+      LoadBalancers:
+        - ContainerName: web
+          ContainerPort: 3000
+          TargetGroupArn: !Ref WebTargetGroup
+
+  WebRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZone
+      Name: !Ref WebDomain
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt Alb.DNSName
+        HostedZoneId: !GetAtt Alb.CanonicalHostedZoneID
+
+  ApiRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZone
+      Name: !Ref ApiDomain
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt Alb.DNSName
+        HostedZoneId: !GetAtt Alb.CanonicalHostedZoneID
+
+Outputs:
+  AlbDnsName:
+    Value: !GetAtt Alb.DNSName
+  ApiDomainOut:
+    Value: !Ref ApiDomain
+  WebDomainOut:
+    Value: !Ref WebDomain
+  ClusterName:
+    Value: !Ref Cluster
+  ApiEcrUrl:
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/threadbrief-${Env}-api
+  WebEcrUrl:
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/threadbrief-${Env}-web
