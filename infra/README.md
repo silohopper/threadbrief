@@ -124,6 +124,12 @@ This creates ECS, ECR, ALB (load balancer), Route53 (DNS), and ACM (SSL certs).
 sh bin/tools.sh stage up
 ```
 
+If Terraform fails with “already exists” errors (state drift), run:
+```bash
+sh bin/tools.sh stage resync
+```
+Then re-run `sh bin/tools.sh stage up`.
+
 ## Step 7) Point GoDaddy DNS to AWS (one time)
 Terraform creates a Route53 hosted zone and gives you 4 name servers. You need
 to point your domain to those name servers.

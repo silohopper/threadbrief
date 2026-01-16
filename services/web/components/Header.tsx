@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { AppBar, Toolbar, Typography, Box, Button } from "@mui/material";
 
 export default function Header() {
@@ -8,6 +9,7 @@ export default function Header() {
     <AppBar position="static" elevation={0} sx={{ borderBottom: "1px solid", borderColor: "divider" }}>
       <Toolbar sx={{ gap: 2 }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <Image src="/logo.jpg" alt="ThreadBrief logo" width={28} height={28} priority />
           <Typography variant="h6" fontWeight={700}>
             ThreadBrief
           </Typography>

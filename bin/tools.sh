@@ -71,6 +71,7 @@ COMMANDS (stage/prod)
   down              placeholder (Terraform coming next)
   deploy            placeholder
   destroy           placeholder
+  resync            import existing AWS resources into state
   unlock <lock_id>  force-unlock Terraform state
   logs <svc>        tail CloudWatch logs (api|web)
   elb               show ELB + target health info
@@ -83,6 +84,7 @@ EXAMPLES
   sh bin/tools.sh stage dns
   sh bin/tools.sh stage deploy
   sh bin/tools.sh stage down
+  sh bin/tools.sh stage resync
   sh bin/tools.sh stage unlock <lock_id>
   sh bin/tools.sh stage logs api
   sh bin/tools.sh stage elb
@@ -98,6 +100,25 @@ tf_init_select_workspace() {
     return
   fi
   terraform -chdir="$tf_dir" workspace new "$env" >/dev/null
+}
+
+tf_resync_state() {
+  local env="$1"
+  local tf_dir="$2"
+
+  tf_init_select_workspace "$env" "$tf_dir"
+
+  try_import() {
+    local addr="$1"
+    local id="$2"
+    terraform -chdir="$tf_dir" import "$addr" "$id" >/dev/null 2>&1 || true
+  }
+
+  try_import aws_ecr_repository.api "threadbrief-$env-api"
+  try_import aws_ecr_repository.web "threadbrief-$env-web"
+  try_import aws_iam_role.task "threadbrief-$env-task"
+  try_import aws_iam_role.task_execution "threadbrief-$env-task-exec"
+  try_import aws_iam_service_linked_role.ecs "ecs.amazonaws.com"
 }
 
 if [ -z "$ENV" ] || [ -z "$CMD" ]; then
@@ -121,7 +142,12 @@ if [ "$ENV" != "dev" ]; then
   case "$CMD" in
     up)
       echo "[$ENV] Terraform apply..."
-      tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
+      if [ "${RESYNC:-}" = "1" ]; then
+        echo "[$ENV] Resyncing existing resources into state..."
+        tf_resync_state "$ENV" "$ROOT_DIR/infra/terraform"
+      else
+        tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
+      fi
       terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars"
       exit 0
       ;;
@@ -144,6 +170,11 @@ if [ "$ENV" != "dev" ]; then
       echo "[$ENV] Terraform destroy..."
       tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
       terraform -chdir="$ROOT_DIR/infra/terraform" destroy -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars"
+      exit 0
+      ;;
+    resync)
+      echo "[$ENV] Resyncing existing resources into state..."
+      tf_resync_state "$ENV" "$ROOT_DIR/infra/terraform"
       exit 0
       ;;
     unlock)
@@ -210,7 +241,12 @@ if [ "$ENV" != "dev" ]; then
         VARS_ARGS+=(-var "ytdlp_proxy=$TF_VAR_ytdlp_proxy")
       fi
 
-      tf_init_select_workspace "$ENV" "$TF_DIR"
+      if [ "${RESYNC:-}" = "1" ]; then
+        echo "[$ENV] Resyncing existing resources into state..."
+        tf_resync_state "$ENV" "$TF_DIR"
+      else
+        tf_init_select_workspace "$ENV" "$TF_DIR"
+      fi
       terraform -chdir="$TF_DIR" apply "${VARS_ARGS[@]}"
 
       api_repo="$(terraform -chdir="$TF_DIR" output -raw api_ecr_url)"
