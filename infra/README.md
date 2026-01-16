@@ -22,6 +22,32 @@ If anything is missing:
 - Terraform: https://developer.hashicorp.com/terraform/downloads
 - Docker Desktop: https://www.docker.com/products/docker-desktop/
 
+## Important: separate Terraform state per env
+Staging and prod must not share the same Terraform state. The tooling now uses
+Terraform workspaces (`stage`, `prod`) so resources don’t overwrite each other.
+
+### One-time migration (if you already created staging)
+If you already applied staging using the default workspace, move that state
+into the `stage` workspace before doing anything in prod:
+
+```bash
+cd infra/terraform
+terraform init
+
+# Create stage workspace (if it doesn't exist)
+terraform workspace new stage || true
+
+# Save current (default) state, then push it into the stage workspace
+terraform state pull > /tmp/threadbrief-stage.tfstate
+terraform workspace select stage
+terraform state push /tmp/threadbrief-stage.tfstate
+
+# Create an empty prod workspace
+terraform workspace new prod || true
+```
+
+From now on, use `sh bin/tools.sh stage ...` and `sh bin/tools.sh prod ...` only.
+
 ## Step 2) Create the IAM policy and group (console)
 This creates a least-privilege policy and a group that uses it.
 
@@ -118,7 +144,7 @@ This creates ECS, ECR, ALB (load balancer), Route53 (DNS), and ACM (SSL certs).
 sh bin/tools.sh stage up
 ```
 
-## Step 7) Point GoDaddy DNS to AWS
+## Step 7) Point GoDaddy DNS to AWS (one time)
 Terraform creates a Route53 hosted zone and gives you 4 name servers. You need
 to point your domain to those name servers.
 
@@ -128,8 +154,11 @@ to point your domain to those name servers.
    sh bin/tools.sh stage dns
    ```
 2) Open your domain in GoDaddy → DNS settings.
-3) Change nameservers to the Route53 values from the command above.
+3) Replace the existing nameservers with the Route53 values from the command above.
 3) Wait for DNS propagation (usually minutes, sometimes longer).
+
+You only do this once. Stage and prod share the same hosted zone for
+`threadbrief.com`, so there is only one set of name servers.
 
 Terraform will keep waiting at the ACM validation step until DNS is updated and
 propagated.
@@ -180,7 +209,17 @@ store it as a `YTDLP_PROXY` secret for the API task. Do **not** commit this file
 - Web: https://staging.threadbrief.com
 - API health: https://api.staging.threadbrief.com/health
 
-## Step 11) Destroy (when done)
+## Step 11) Provision prod (after staging works)
+```bash
+sh bin/tools.sh prod up
+sh bin/tools.sh prod deploy
+```
+
+## Step 12) Test prod
+- Web: https://threadbrief.com
+- API health: https://api.threadbrief.com/health
+
+## Step 13) Destroy (when done)
 ```bash
 sh bin/tools.sh stage down
 ```

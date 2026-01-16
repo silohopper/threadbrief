@@ -89,6 +89,18 @@ EXAMPLES
 EOF
 }
 
+tf_init_select_workspace() {
+  local env="$1"
+  local tf_dir="$2"
+
+  terraform -chdir="$tf_dir" init
+  if terraform -chdir="$tf_dir" workspace list | grep -Eq "^(\\* )?${env}$"; then
+    terraform -chdir="$tf_dir" workspace select "$env" >/dev/null
+  else
+    terraform -chdir="$tf_dir" workspace new "$env" >/dev/null
+  fi
+}
+
 if [ -z "$ENV" ] || [ -z "$CMD" ]; then
   printf "%bNot enough arguments. Usage: sh bin/tools.sh <env> <command> [service]%b\n" "$RED" "$RESET"
   if [ -z "$ENV" ]; then
@@ -110,16 +122,17 @@ if [ "$ENV" != "dev" ]; then
   case "$CMD" in
     up)
       echo "[$ENV] Terraform apply..."
-      terraform -chdir="$ROOT_DIR/infra/terraform" init
+      tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
       terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars"
       exit 0
       ;;
     dns)
+      tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
       terraform -chdir="$ROOT_DIR/infra/terraform" output route53_name_servers
       exit 0
       ;;
     cert)
-      terraform -chdir="$ROOT_DIR/infra/terraform" init
+      tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
       if ! terraform -chdir="$ROOT_DIR/infra/terraform" output acm_validation_records >/dev/null 2>&1; then
         terraform -chdir="$ROOT_DIR/infra/terraform" apply \
           -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" \
@@ -130,7 +143,7 @@ if [ "$ENV" != "dev" ]; then
       ;;
     down|destroy)
       echo "[$ENV] Terraform destroy..."
-      terraform -chdir="$ROOT_DIR/infra/terraform" init
+      tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
       terraform -chdir="$ROOT_DIR/infra/terraform" destroy -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars"
       exit 0
       ;;
@@ -198,7 +211,7 @@ if [ "$ENV" != "dev" ]; then
         VARS_ARGS+=(-var "ytdlp_proxy=$TF_VAR_ytdlp_proxy")
       fi
 
-      terraform -chdir="$TF_DIR" init
+      tf_init_select_workspace "$ENV" "$TF_DIR"
       terraform -chdir="$TF_DIR" apply "${VARS_ARGS[@]}"
 
       api_repo="$(terraform -chdir="$TF_DIR" output -raw api_ecr_url)"
