@@ -166,6 +166,16 @@ This builds Docker images, pushes them to ECR, then restarts ECS services.
 sh bin/tools.sh stage deploy
 ```
 
+### Optional: yt-dlp proxy (recommended for AWS)
+YouTube often blocks AWS datacenter IPs even with cookies. A residential proxy
+fixes this. If you have a proxy URL:
+1) Save it to `env/<env>/proxy.txt` (one line, e.g. `http://user:pass@host:port` or
+   `host:port:username:password`). We are currently using Decodo (Smartproxy).
+2) Run `sh bin/tools.sh stage deploy`.
+
+The deploy script will read `env/<env>/proxy.txt` (or `env/dev/proxy.txt`) and
+store it as a `YTDLP_PROXY` secret for the API task. Do **not** commit this file.
+
 ## Step 10) Test
 - Web: https://staging.threadbrief.com
 - API health: https://api.staging.threadbrief.com/health

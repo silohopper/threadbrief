@@ -25,6 +25,17 @@ class TranscriptError(Exception):
 logger = logging.getLogger(__name__)
 
 
+def _normalize_proxy(proxy_url: str) -> str:
+    """Normalize proxy strings to URL form expected by yt-dlp."""
+    if "://" in proxy_url:
+        return proxy_url
+    parts = proxy_url.split(":")
+    if len(parts) == 4:
+        host, port, user, password = parts
+        return f"http://{user}:{password}@{host}:{port}"
+    return proxy_url
+
+
 def _resolve_executable(name: str, env_var: str | None = None) -> str | None:
     """Resolve a CLI executable path with an optional env override."""
     if env_var:
@@ -62,6 +73,10 @@ def _download_youtube_audio(url: str, workdir: str) -> Path:
         cookies_path = Path(workdir) / "cookies.txt"
         cookies_path.write_text(cookies_text, encoding="utf-8")
         cmd.extend(["--cookies", str(cookies_path)])
+    proxy_url = os.getenv("YTDLP_PROXY")
+    logger.info("yt-dlp proxy present=%s", bool(proxy_url))
+    if proxy_url:
+        cmd.extend(["--proxy", _normalize_proxy(proxy_url)])
     extra_args = os.getenv("YTDLP_ARGS", "").split()
     if extra_args:
         logger.info("yt-dlp extra args=%s", extra_args)

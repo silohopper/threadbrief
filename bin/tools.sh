@@ -145,6 +145,14 @@ if [ "$ENV" != "dev" ]; then
         export TF_VAR_ytdlp_cookies="$(cat "$COOKIES_FILE")"
         VARS_ARGS+=(-var "ytdlp_cookies=$TF_VAR_ytdlp_cookies")
       fi
+      PROXY_FILE="$ROOT_DIR/env/$ENV/proxy.txt"
+      if [ ! -f "$PROXY_FILE" ]; then
+        PROXY_FILE="$ROOT_DIR/env/dev/proxy.txt"
+      fi
+      if [ -f "$PROXY_FILE" ]; then
+        export TF_VAR_ytdlp_proxy="$(tr -d '\n' < "$PROXY_FILE")"
+        VARS_ARGS+=(-var "ytdlp_proxy=$TF_VAR_ytdlp_proxy")
+      fi
 
       terraform -chdir="$TF_DIR" init
       terraform -chdir="$TF_DIR" apply "${VARS_ARGS[@]}"
@@ -187,6 +195,9 @@ case "$CMD" in
     if [ -f "$ROOT_DIR/env/dev/cookies.txt" ]; then
       export YTDLP_COOKIES="$(cat "$ROOT_DIR/env/dev/cookies.txt")"
     fi
+    if [ -f "$ROOT_DIR/env/dev/proxy.txt" ]; then
+      export YTDLP_PROXY="$(tr -d '\n' < "$ROOT_DIR/env/dev/proxy.txt")"
+    fi
     compose dev up -d --build
     ;;
   down)
@@ -198,6 +209,9 @@ case "$CMD" in
     compose dev down
     if [ -f "$ROOT_DIR/env/dev/cookies.txt" ]; then
       export YTDLP_COOKIES="$(cat "$ROOT_DIR/env/dev/cookies.txt")"
+    fi
+    if [ -f "$ROOT_DIR/env/dev/proxy.txt" ]; then
+      export YTDLP_PROXY="$(tr -d '\n' < "$ROOT_DIR/env/dev/proxy.txt")"
     fi
     compose dev up -d --build
     ;;
@@ -230,7 +244,11 @@ case "$CMD" in
     ;;
   test-youtube)
     echo "[DEV] Running YouTube integration test..."
-    compose dev exec -T api sh -lc "YOUTUBE_INTEGRATION=1 pytest -q -k youtube -s"
+    proxy_env=""
+    if [ -f "$ROOT_DIR/env/dev/proxy.txt" ]; then
+      proxy_env="YTDLP_PROXY=$(tr -d '\n' < "$ROOT_DIR/env/dev/proxy.txt")"
+    fi
+    compose dev exec -T api sh -lc "$proxy_env YOUTUBE_INTEGRATION=1 pytest -q -k youtube -s"
     ;;
   test-gemini)
     echo "[DEV] Running Gemini integration test..."

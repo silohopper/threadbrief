@@ -62,6 +62,13 @@ variable "ytdlp_cookies" {
   default     = ""
 }
 
+variable "ytdlp_proxy" {
+  type        = string
+  description = "Optional yt-dlp proxy URL (e.g. http://user:pass@host:port)."
+  sensitive   = true
+  default     = ""
+}
+
 variable "cors_origins" {
   type        = string
   description = "CORS origins for the API."
