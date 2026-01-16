@@ -82,9 +82,17 @@ def _download_youtube_audio(url: str, workdir: str) -> Path:
         logger.info("yt-dlp extra args=%s", extra_args)
     if extra_args:
         cmd.extend(extra_args)
+    ytdlp_timeout = int(os.getenv("YTDLP_TIMEOUT_SECONDS", "300"))
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=ytdlp_timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise TranscriptError("yt-dlp timed out while downloading audio.") from exc
     except subprocess.CalledProcessError as exc:
+        logger.warning(
+            "yt-dlp failed (cookies_present=%s proxy_present=%s)",
+            bool(cookies_text),
+            bool(proxy_url),
+        )
         stderr = exc.stderr.strip() if exc.stderr else "Unknown yt-dlp error."
         raise TranscriptError(f"yt-dlp failed to download audio: {stderr}") from exc
 
@@ -125,8 +133,11 @@ def _transcribe_audio(audio_path: Path) -> str:
     if language:
         cmd.extend(["--language", language])
 
+    whisper_timeout = int(os.getenv("WHISPER_TIMEOUT_SECONDS", "300"))
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=whisper_timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise TranscriptError("Whisper timed out while transcribing audio.") from exc
     except subprocess.CalledProcessError as exc:
         stderr = exc.stderr.strip() if exc.stderr else "Unknown Whisper error."
         raise TranscriptError(f"Whisper transcription failed: {stderr}") from exc
