@@ -93,11 +93,15 @@ script without granting full admin access.
         "iam:CreateServiceLinkedRole",
         "iam:CreatePolicy",
         "iam:CreatePolicyVersion",
+        "iam:DeleteServiceLinkedRole",
+        "iam:GetServiceLinkedRoleDeletionStatus",
+        "iam:DeletePolicyVersion",
         "iam:DeletePolicy",
         "iam:GetPolicy",
         "iam:GetPolicyVersion",
         "iam:ListPolicyVersions",
         "iam:ListPolicies",
+        "iam:ListInstanceProfilesForRole",
         "iam:AttachUserPolicy",
         "iam:DetachUserPolicy",
         "logs:*",
@@ -110,6 +114,9 @@ script without granting full admin access.
   ]
 }
 ```
+If you want “delete and re-add” to be the default recovery path, make sure this
+policy includes `iam:DeletePolicyVersion` so Terraform can fully remove and
+recreate IAM policies during rebuilds.
 
 ## Step 5) Decide your domains
 For staging we will use:
@@ -228,8 +235,9 @@ sh bin/tools.sh stage down
 
 ## Debug checklist (when something goes wrong)
 1) **Terraform state**
-   - Re-run: `sh bin/tools.sh stage up` (Terraform is idempotent).
-   - Destroy if needed: `sh bin/tools.sh stage down`.
+   - Re-run: `sh bin/tools.sh stage up` (auto-resync on failure).
+   - If it still fails or resources are inconsistent, delete and re-add:
+     `sh bin/tools.sh stage down` then `sh bin/tools.sh stage up`.
 2) **ECS service events**
    - AWS Console → ECS → Cluster → Service → Events.
 3) **Container logs**
@@ -242,9 +250,11 @@ sh bin/tools.sh stage down
    - ACM → certificate status should be **Issued**.
 
 ## If Terraform partially creates resources
-Terraform tracks what it created. Just re-run `sh bin/tools.sh stage up` to finish,
-or `sh bin/tools.sh stage down` to clean up. If AWS shows leftovers, re-run destroy
-or use the console to delete the specific resource.
+Terraform tracks what it created. Re-run `sh bin/tools.sh stage up` to finish. If
+that fails, use the “delete and re-add” path: `sh bin/tools.sh stage down` then
+`sh bin/tools.sh stage up`. This is more bullet-proof but requires delete
+permissions (notably `iam:DeletePolicyVersion`) so Terraform can remove and
+recreate IAM policies and related resources.
 
 ## Notes
 - Images are pushed to ECR with tag `latest` by default (override with `TAG=...`).

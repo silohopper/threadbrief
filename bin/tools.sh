@@ -142,13 +142,16 @@ if [ "$ENV" != "dev" ]; then
   case "$CMD" in
     up)
       echo "[$ENV] Terraform apply..."
+      tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
       if [ "${RESYNC:-}" = "1" ]; then
         echo "[$ENV] Resyncing existing resources into state..."
         tf_resync_state "$ENV" "$ROOT_DIR/infra/terraform"
-      else
-        tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
       fi
-      terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars"
+      if ! terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" -auto-approve; then
+        echo "[$ENV] Apply failed; attempting resync and retry..." >&2
+        tf_resync_state "$ENV" "$ROOT_DIR/infra/terraform"
+        terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" -auto-approve
+      fi
       exit 0
       ;;
     dns)
@@ -169,7 +172,10 @@ if [ "$ENV" != "dev" ]; then
     down|destroy)
       echo "[$ENV] Terraform destroy..."
       tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
-      terraform -chdir="$ROOT_DIR/infra/terraform" destroy -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars"
+      if [ "$ENV" != "prod" ]; then
+        terraform -chdir="$ROOT_DIR/infra/terraform" state rm aws_iam_service_linked_role.ecs >/dev/null 2>&1 || true
+      fi
+      terraform -chdir="$ROOT_DIR/infra/terraform" destroy -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" -auto-approve
       exit 0
       ;;
     resync)
@@ -220,6 +226,10 @@ if [ "$ENV" != "dev" ]; then
       AWS_REGION="${AWS_REGION:-ap-southeast-2}"
       TAG="${TAG:-latest}"
       TF_DIR="$ROOT_DIR/infra/terraform"
+      if ! docker info >/dev/null 2>&1; then
+        echo "Docker daemon not running. Start Docker Desktop and retry." >&2
+        exit 1
+      fi
       VARS_ARGS=(-var-file="$TF_DIR/envs/$ENV.tfvars")
       if [ -f "$TF_DIR/envs/$ENV.local.tfvars" ]; then
         VARS_ARGS+=(-var-file="$TF_DIR/envs/$ENV.local.tfvars")
@@ -247,7 +257,7 @@ if [ "$ENV" != "dev" ]; then
       else
         tf_init_select_workspace "$ENV" "$TF_DIR"
       fi
-      terraform -chdir="$TF_DIR" apply "${VARS_ARGS[@]}"
+      terraform -chdir="$TF_DIR" apply "${VARS_ARGS[@]}" -auto-approve
 
       api_repo="$(terraform -chdir="$TF_DIR" output -raw api_ecr_url)"
       web_repo="$(terraform -chdir="$TF_DIR" output -raw web_ecr_url)"

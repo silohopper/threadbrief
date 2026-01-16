@@ -92,11 +92,13 @@ resource "aws_security_group" "ecs" {
 resource "aws_ecr_repository" "api" {
   name                 = "threadbrief-${var.env}-api"
   image_tag_mutability = "MUTABLE"
+  force_delete         = true
 }
 
 resource "aws_ecr_repository" "web" {
   name                 = "threadbrief-${var.env}-web"
   image_tag_mutability = "MUTABLE"
+  force_delete         = true
 }
 
 resource "aws_cloudwatch_log_group" "api" {
@@ -202,6 +204,9 @@ resource "aws_secretsmanager_secret_version" "ytdlp_proxy" {
 
 resource "aws_iam_service_linked_role" "ecs" {
   aws_service_name = "ecs.amazonaws.com"
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_ecs_task_definition" "api" {
