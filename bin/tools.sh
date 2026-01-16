@@ -245,6 +245,17 @@ if [ "$ENV" != "dev" ]; then
         echo "Docker daemon not running. Start Docker Desktop and retry." >&2
         exit 1
       fi
+      # Auto-restore secrets that are scheduled for deletion so apply can recreate/attach them.
+      for secret_name in \
+        "threadbrief/$ENV/gemini_api_key" \
+        "threadbrief/$ENV/ytdlp_cookies" \
+        "threadbrief/$ENV/ytdlp_proxy"; do
+        if aws secretsmanager describe-secret --secret-id "$secret_name" --query "DeletedDate" --output text >/dev/null 2>&1; then
+          if [ "$(aws secretsmanager describe-secret --secret-id "$secret_name" --query "DeletedDate" --output text 2>/dev/null)" != "None" ]; then
+            aws secretsmanager restore-secret --secret-id "$secret_name" >/dev/null
+          fi
+        fi
+      done
       VARS_ARGS=(-var-file="$TF_DIR/envs/$ENV.tfvars")
       if [ -f "$TF_DIR/envs/$ENV.local.tfvars" ]; then
         VARS_ARGS+=(-var-file="$TF_DIR/envs/$ENV.local.tfvars")
@@ -265,6 +276,21 @@ if [ "$ENV" != "dev" ]; then
         export TF_VAR_ytdlp_proxy="$(tr -d '\n' < "$PROXY_FILE")"
         VARS_ARGS+=(-var "ytdlp_proxy=$TF_VAR_ytdlp_proxy")
       fi
+
+      # Import any existing secrets into state so apply doesn't fail on duplicates.
+      for secret_name in \
+        "threadbrief/$ENV/gemini_api_key:aws_secretsmanager_secret.gemini[0]" \
+        "threadbrief/$ENV/ytdlp_cookies:aws_secretsmanager_secret.ytdlp_cookies[0]" \
+        "threadbrief/$ENV/ytdlp_proxy:aws_secretsmanager_secret.ytdlp_proxy[0]"; do
+        secret_id="${secret_name%%:*}"
+        tf_addr="${secret_name##*:}"
+        if aws secretsmanager describe-secret --secret-id "$secret_id" --query "ARN" --output text >/dev/null 2>&1; then
+          secret_arn="$(aws secretsmanager describe-secret --secret-id "$secret_id" --query "ARN" --output text 2>/dev/null)"
+          if [ -n "$secret_arn" ] && [ "$secret_arn" != "None" ]; then
+            terraform -chdir="$TF_DIR" import "${VARS_ARGS[@]}" "$tf_addr" "$secret_arn" >/dev/null 2>&1 || true
+          fi
+        fi
+      done
 
       if [ "${RESYNC:-}" = "1" ]; then
         echo "[$ENV] Resyncing existing resources into state..."

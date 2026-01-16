@@ -170,6 +170,7 @@ resource "aws_iam_role" "task" {
 }
 
 resource "aws_secretsmanager_secret" "gemini" {
+  # If a secret is scheduled for deletion, restore it before apply (deploy handles this).
   count = var.gemini_api_key != "" ? 1 : 0
   name  = "threadbrief/${var.env}/gemini_api_key"
 }
@@ -181,6 +182,7 @@ resource "aws_secretsmanager_secret_version" "gemini" {
 }
 
 resource "aws_secretsmanager_secret" "ytdlp_cookies" {
+  # If a secret is scheduled for deletion, restore it before apply (deploy handles this).
   count = var.ytdlp_cookies != "" ? 1 : 0
   name  = "threadbrief/${var.env}/ytdlp_cookies"
 }
@@ -192,6 +194,7 @@ resource "aws_secretsmanager_secret_version" "ytdlp_cookies" {
 }
 
 resource "aws_secretsmanager_secret" "ytdlp_proxy" {
+  # If a secret is scheduled for deletion, restore it before apply (deploy handles this).
   count = var.ytdlp_proxy != "" ? 1 : 0
   name  = "threadbrief/${var.env}/ytdlp_proxy"
 }
