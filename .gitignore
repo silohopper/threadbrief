@@ -17,4 +17,5 @@ terraform.tfstate.*
 *.tfstate
 *.tfstate.*
 infra/terraform/envs/*.local.tfvars
+infra/terraform/logs/
 .DS_Store

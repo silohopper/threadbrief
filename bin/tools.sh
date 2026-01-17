@@ -72,6 +72,8 @@ COMMANDS (stage/prod)
   deploy            placeholder
   destroy           placeholder
   plan              terraform plan with correct var-file
+  status            show terraform state/lock status
+  tail              tail terraform logs for the last up/down action
   resync            import existing AWS resources into state
   unlock <lock_id>  force-unlock Terraform state
   logs <svc>        tail CloudWatch logs (api|web)
@@ -86,6 +88,8 @@ EXAMPLES
   sh bin/tools.sh stage deploy
   sh bin/tools.sh stage down
   sh bin/tools.sh stage plan
+  sh bin/tools.sh stage status
+  sh bin/tools.sh stage tail
   sh bin/tools.sh stage resync
   sh bin/tools.sh stage unlock <lock_id>
   sh bin/tools.sh stage logs api
@@ -102,6 +106,15 @@ tf_init_select_workspace() {
     return
   fi
   terraform -chdir="$tf_dir" workspace new "$env" >/dev/null
+}
+
+tf_log_path() {
+  local env="$1"
+  local action="$2"
+  local tf_dir="$3"
+  local log_dir="$tf_dir/logs"
+  mkdir -p "$log_dir"
+  echo "$log_dir/${env}-${action}-$(date +%Y%m%d-%H%M%S).log"
 }
 
 tf_resync_state() {
@@ -191,11 +204,13 @@ if [ "$ENV" != "dev" ]; then
         echo "[$ENV] Resyncing existing resources into state..."
         tf_resync_state "$ENV" "$ROOT_DIR/infra/terraform"
       fi
-      if ! terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" -auto-approve; then
+      log_path="$(tf_log_path "$ENV" "up" "$ROOT_DIR/infra/terraform")"
+      if ! terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" -auto-approve 2>&1 | tee "$log_path"; then
         echo "[$ENV] Apply failed; attempting resync and retry..." >&2
         tf_resync_state "$ENV" "$ROOT_DIR/infra/terraform"
-        terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" -auto-approve
+        terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" -auto-approve 2>&1 | tee -a "$log_path"
       fi
+      echo "[$ENV] Terraform log: $log_path"
       exit 0
       ;;
     dns)
@@ -230,7 +245,9 @@ if [ "$ENV" != "dev" ]; then
       if [ "$ENV" != "prod" ]; then
         terraform -chdir="$ROOT_DIR/infra/terraform" state rm aws_iam_service_linked_role.ecs >/dev/null 2>&1 || true
       fi
-      terraform -chdir="$ROOT_DIR/infra/terraform" destroy -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" -auto-approve
+      log_path="$(tf_log_path "$ENV" "down" "$ROOT_DIR/infra/terraform")"
+      terraform -chdir="$ROOT_DIR/infra/terraform" destroy -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" -auto-approve 2>&1 | tee "$log_path"
+      echo "[$ENV] Terraform log: $log_path"
       exit 0
       ;;
     resync)
@@ -252,6 +269,41 @@ if [ "$ENV" != "dev" ]; then
         echo "[$ENV] Plan failed. If the state is locked, run: sh bin/tools.sh $ENV unlock <lock_id>" >&2
         exit 1
       fi
+      exit 0
+      ;;
+    status)
+      tf_dir="$ROOT_DIR/infra/terraform"
+      lock_file="$tf_dir/terraform.tfstate.d/$ENV/.terraform.tfstate.lock.info"
+      state_file="$tf_dir/terraform.tfstate.d/$ENV/terraform.tfstate"
+      echo "[$ENV] Terraform status"
+      if [ -f "$state_file" ]; then
+        echo "State file: $state_file"
+        stat -f "  modified: %Sm" -t "%Y-%m-%d %H:%M:%S" "$state_file"
+      else
+        echo "State file: missing"
+      fi
+      if [ -f "$lock_file" ]; then
+        echo "Lock file: $lock_file"
+        cat "$lock_file"
+      else
+        echo "Lock file: none"
+      fi
+      exit 0
+      ;;
+    tail)
+      tf_dir="$ROOT_DIR/infra/terraform"
+      log_dir="$tf_dir/logs"
+      if [ ! -d "$log_dir" ]; then
+        echo "No log directory found at $log_dir."
+        exit 1
+      fi
+      log_file="$(ls -t "$log_dir"/"$ENV"-*.log 2>/dev/null | head -n 1)"
+      if [ -z "$log_file" ]; then
+        echo "No logs found for $ENV in $log_dir."
+        exit 1
+      fi
+      echo "Tailing $log_file"
+      tail -f "$log_file"
       exit 0
       ;;
     logs)
