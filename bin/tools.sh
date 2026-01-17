@@ -226,15 +226,47 @@ tf_resync_state() {
   #   If duplicates happen again, filter for Config.PrivateZone==false.
   # ---------------------------------------------------------------------------
   if [ "$env" = "prod" ]; then
-    hz_id="$(aws route53 list-hosted-zones-by-name \
+    # -------------------------------------------------------------------------
+    # ROUTE53 DUPLICATE ZONE AUTO-SELECTION (stubborn issue)
+    #
+    # We kept hitting a loop where "prod up" created a *new* hosted zone for
+    # threadbrief.com, even though one already existed. Root cause: Terraform
+    # can only reuse a hosted zone if it is imported into state, and AWS returns
+    # the "first match" when multiple public zones share the same name.
+    #
+    # Fix: if multiple public zones exist, pick the one with the highest
+    # ResourceRecordSetCount (the zone with real records) and reuse it. We still
+    # log a warning so duplicates can be cleaned up later.
+    # -------------------------------------------------------------------------
+    hz_lines="$(aws route53 list-hosted-zones-by-name \
       --dns-name threadbrief.com \
-      --query "HostedZones[?Name=='threadbrief.com.']|[0].Id" \
+      --query "HostedZones[?Name=='threadbrief.com.' && Config.PrivateZone==\`false\`].[Id,ResourceRecordSetCount]" \
       --output text 2>/dev/null || true)"
+    hz_id=""
+    hz_count=0
+    if [ -n "$hz_lines" ] && [ "$hz_lines" != "None" ]; then
+      while IFS=$'\t' read -r id count; do
+        if [ -n "$count" ] && [ "$count" -ge "$hz_count" ]; then
+          hz_count="$count"
+          hz_id="$id"
+        fi
+      done <<< "$hz_lines"
+      if [ "$(printf "%s\n" "$hz_lines" | wc -l | tr -d ' ')" -gt 1 ]; then
+        echo "Warning: multiple public Route53 zones found for threadbrief.com; using the one with $hz_count records." >&2
+      fi
+    fi
+    # -------------------------------------------------------------------------
+    # IMPORT EXISTING ZONE
+    #
+    # If the hosted zone exists, import it into Terraform state before apply.
+    # This ensures prod reuses the same zone and prevents new zones.
+    # Note: resource address is counted now, so we import [0].
+    # -------------------------------------------------------------------------
     if [ -n "$hz_id" ] && [ "$hz_id" != "None" ]; then
       # AWS returns hosted zone ID like "/hostedzone/Z123..."
       # Terraform import expects "Z123..."
       hz_id="${hz_id#/hostedzone/}"
-      try_import aws_route53_zone.this "$hz_id"
+      try_import aws_route53_zone.this[0] "$hz_id"
     fi
   fi
   # ---------------------------------------------------------------------------
@@ -383,17 +415,22 @@ if [ "$ENV" != "dev" ]; then
       tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
       AWS_REGION="${AWS_REGION:-ap-southeast-2}"
 
-      # Some accounts block destroy if ECR repos contain images or have settings.
-      # This does a targeted apply that ensures ECR repos are tracked correctly.
-      ecr_targets=()
-      if aws ecr describe-repositories --region "$AWS_REGION" --repository-names "threadbrief-$ENV-api" >/dev/null 2>&1; then
-        ecr_targets+=(-target=aws_ecr_repository.api)
-      fi
-      if aws ecr describe-repositories --region "$AWS_REGION" --repository-names "threadbrief-$ENV-web" >/dev/null 2>&1; then
-        ecr_targets+=(-target=aws_ecr_repository.web)
-      fi
-      if [ "${#ecr_targets[@]}" -gt 0 ]; then
-        terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" "${ecr_targets[@]}" -auto-approve
+      if [ "$ENV" = "prod" ]; then
+        # Keep Route53 zone, but remove it from state so destroy does not block.
+        terraform -chdir="$ROOT_DIR/infra/terraform" state rm 'aws_route53_zone.this[0]' >/dev/null 2>&1 || true
+      else
+        # Some accounts block destroy if ECR repos contain images or have settings.
+        # This does a targeted apply that ensures ECR repos are tracked correctly.
+        ecr_targets=()
+        if aws ecr describe-repositories --region "$AWS_REGION" --repository-names "threadbrief-$ENV-api" >/dev/null 2>&1; then
+          ecr_targets+=(-target=aws_ecr_repository.api)
+        fi
+        if aws ecr describe-repositories --region "$AWS_REGION" --repository-names "threadbrief-$ENV-web" >/dev/null 2>&1; then
+          ecr_targets+=(-target=aws_ecr_repository.web)
+        fi
+        if [ "${#ecr_targets[@]}" -gt 0 ]; then
+          terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" "${ecr_targets[@]}" -auto-approve
+        fi
       fi
 
       # Stage uses an imported ECS service-linked role sometimes; remove it from state
