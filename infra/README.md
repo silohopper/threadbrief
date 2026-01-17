@@ -256,6 +256,13 @@ that fails, use the “delete and re-add” path: `sh bin/tools.sh stage down` t
 permissions (notably `iam:DeletePolicyVersion`) so Terraform can remove and
 recreate IAM policies and related resources.
 
+## Teardown behavior
+- `stage down` and `prod down` keep the Route53 hosted zone intact (removed from
+  Terraform state) to avoid breaking DNS for the other environment.
+- If you ever need to delete the hosted zone, do it manually after removing the
+  `prevent_destroy` guard.
+
+
 ## Notes
 - Images are pushed to ECR with tag `latest` by default (override with `TAG=...`).
 - `GEMINI_API_KEY` is stored in Secrets Manager if provided via tfvars.
@@ -278,3 +285,6 @@ If YouTube blocks downloads in staging, add cookies:
 - Use smaller task sizes for stage if performance allows.
 - Serve the web UI from S3 + CloudFront (static) instead of Fargate.
 - Keep ACM (free) and Route53 (low cost) as-is.
+
+## Product reminders
+- Add an ETA/progress bar during brief generation (smooth % based on stages).

@@ -71,6 +71,7 @@ COMMANDS (stage/prod)
   down              placeholder (Terraform coming next)
   deploy            placeholder
   destroy           placeholder
+  plan              terraform plan with correct var-file
   resync            import existing AWS resources into state
   unlock <lock_id>  force-unlock Terraform state
   logs <svc>        tail CloudWatch logs (api|web)
@@ -84,6 +85,7 @@ EXAMPLES
   sh bin/tools.sh stage dns
   sh bin/tools.sh stage deploy
   sh bin/tools.sh stage down
+  sh bin/tools.sh stage plan
   sh bin/tools.sh stage resync
   sh bin/tools.sh stage unlock <lock_id>
   sh bin/tools.sh stage logs api
@@ -107,12 +109,47 @@ tf_resync_state() {
   local tf_dir="$2"
 
   tf_init_select_workspace "$env" "$tf_dir"
+  AWS_REGION="${AWS_REGION:-ap-southeast-2}"
 
   try_import() {
     local addr="$1"
     local id="$2"
     terraform -chdir="$tf_dir" import "$addr" "$id" >/dev/null 2>&1 || true
   }
+
+  vpc_id="$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text 2>/dev/null || true)"
+  if [ -n "$vpc_id" ] && [ "$vpc_id" != "None" ]; then
+    sg_id="$(aws ec2 describe-security-groups --filters Name=group-name,Values="threadbrief-$env-alb" Name=vpc-id,Values="$vpc_id" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)"
+    if [ -n "$sg_id" ] && [ "$sg_id" != "None" ]; then
+      try_import aws_security_group.alb "$sg_id"
+    fi
+  fi
+
+  for log_group in "/ecs/threadbrief/$env/api" "/ecs/threadbrief/$env/web"; do
+    lg_name="$(aws logs describe-log-groups --log-group-name-prefix "$log_group" --query "logGroups[?logGroupName=='$log_group']|[0].logGroupName" --output text 2>/dev/null || true)"
+    if [ -n "$lg_name" ] && [ "$lg_name" != "None" ]; then
+      if [ "$log_group" = "/ecs/threadbrief/$env/api" ]; then
+        try_import aws_cloudwatch_log_group.api "$log_group"
+      else
+        try_import aws_cloudwatch_log_group.web "$log_group"
+      fi
+    fi
+  done
+
+  lb_arn="$(aws elbv2 describe-load-balancers --names "threadbrief-$env" --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || true)"
+  if [ -n "$lb_arn" ] && [ "$lb_arn" != "None" ]; then
+    try_import aws_lb.this "$lb_arn"
+  fi
+
+  api_tg_arn="$(aws elbv2 describe-target-groups --names "threadbrief-$env-api" --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || true)"
+  if [ -n "$api_tg_arn" ] && [ "$api_tg_arn" != "None" ]; then
+    try_import aws_lb_target_group.api "$api_tg_arn"
+  fi
+
+  web_tg_arn="$(aws elbv2 describe-target-groups --names "threadbrief-$env-web" --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || true)"
+  if [ -n "$web_tg_arn" ] && [ "$web_tg_arn" != "None" ]; then
+    try_import aws_lb_target_group.web "$web_tg_arn"
+  fi
 
   try_import aws_ecr_repository.api "threadbrief-$env-api"
   try_import aws_ecr_repository.web "threadbrief-$env-web"
@@ -143,7 +180,10 @@ if [ "$ENV" != "dev" ]; then
     up)
       echo "[$ENV] Terraform apply..."
       tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
-      if [ "$ENV" != "prod" ]; then
+      if [ "$ENV" = "prod" ]; then
+        echo "[$ENV] Importing existing resources into state..."
+        tf_resync_state "$ENV" "$ROOT_DIR/infra/terraform"
+      else
         slr_arn="arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS"
         terraform -chdir="$ROOT_DIR/infra/terraform" import -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" aws_iam_service_linked_role.ecs "$slr_arn" >/dev/null 2>&1 || true
       fi
@@ -204,6 +244,14 @@ if [ "$ENV" != "dev" ]; then
         exit 1
       fi
       terraform -chdir="$ROOT_DIR/infra/terraform" force-unlock "$ARG"
+      exit 0
+      ;;
+    plan)
+      tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
+      if ! terraform -chdir="$ROOT_DIR/infra/terraform" plan -var-file="envs/$ENV.tfvars"; then
+        echo "[$ENV] Plan failed. If the state is locked, run: sh bin/tools.sh $ENV unlock <lock_id>" >&2
+        exit 1
+      fi
       exit 0
       ;;
     logs)
