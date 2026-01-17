@@ -11,7 +11,9 @@ data "aws_subnets" "default" {
 
 data "aws_route53_zone" "this" {
   count = var.manage_hosted_zone ? 0 : 1
-  name  = var.domain_name
+  zone_id      = var.route53_zone_id != "" ? var.route53_zone_id : null
+  name         = var.route53_zone_id == "" ? var.domain_name : null
+  private_zone = false
 }
 
 locals {

@@ -116,6 +116,7 @@ COMMANDS (stage/prod)
   plan              terraform plan with correct var-file
   status            show terraform state/lock status
   tail              tail terraform logs for the last up/down action
+  zoneid            show Route53 hosted zone IDs for domain_name
   resync            import existing AWS resources into state
   unlock <lock_id>  force-unlock Terraform state
   logs <svc>        tail CloudWatch logs (api|web)
@@ -244,16 +245,21 @@ tf_resync_state() {
       --output text 2>/dev/null || true)"
     hz_id=""
     hz_count=0
+    hz_lines_count=0
     if [ -n "$hz_lines" ] && [ "$hz_lines" != "None" ]; then
+      hz_lines_count="$(printf "%s\n" "$hz_lines" | wc -l | tr -d ' ')"
       while IFS=$'\t' read -r id count; do
         if [ -n "$count" ] && [ "$count" -ge "$hz_count" ]; then
           hz_count="$count"
           hz_id="$id"
         fi
       done <<< "$hz_lines"
-      if [ "$(printf "%s\n" "$hz_lines" | wc -l | tr -d ' ')" -gt 1 ]; then
-        echo "Warning: multiple public Route53 zones found for threadbrief.com; using the one with $hz_count records." >&2
-      fi
+    fi
+    if [ -n "${ROUTE53_ZONE_ID:-}" ]; then
+      hz_id="$ROUTE53_ZONE_ID"
+    elif [ "$hz_lines_count" -gt 1 ]; then
+      echo "Error: multiple public Route53 zones found for threadbrief.com. Set ROUTE53_ZONE_ID to the one you want." >&2
+      exit 1
     fi
     # -------------------------------------------------------------------------
     # IMPORT EXISTING ZONE
@@ -358,6 +364,11 @@ if [ "$ENV" != "dev" ]; then
       echo "[$ENV] Terraform apply..."
       tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
 
+      vars_args=(-var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars")
+      if [ -n "${ROUTE53_ZONE_ID:-}" ]; then
+        vars_args+=(-var "route53_zone_id=$ROUTE53_ZONE_ID")
+      fi
+
       # Prod gets special handling:
       #   - import existing resources into Terraform state before apply
       if [ "$ENV" = "prod" ]; then
@@ -379,10 +390,10 @@ if [ "$ENV" != "dev" ]; then
       log_path="$(tf_log_path "$ENV" "up" "$ROOT_DIR/infra/terraform")"
 
       # Run terraform apply; if it fails, try resync and retry once
-      if ! terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" -auto-approve 2>&1 | tee "$log_path"; then
+      if ! terraform -chdir="$ROOT_DIR/infra/terraform" apply "${vars_args[@]}" -auto-approve 2>&1 | tee "$log_path"; then
         echo "[$ENV] Apply failed; attempting resync and retry..." >&2
         tf_resync_state "$ENV" "$ROOT_DIR/infra/terraform"
-        terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" -auto-approve 2>&1 | tee -a "$log_path"
+        terraform -chdir="$ROOT_DIR/infra/terraform" apply "${vars_args[@]}" -auto-approve 2>&1 | tee -a "$log_path"
       fi
 
       echo "[$ENV] Terraform log: $log_path"
@@ -400,12 +411,30 @@ if [ "$ENV" != "dev" ]; then
       # For ACM certificates, you often need validation records.
       # This prints out the CNAME validation records Terraform expects.
       tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
+      vars_args=(-var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars")
+      if [ -n "${ROUTE53_ZONE_ID:-}" ]; then
+        vars_args+=(-var "route53_zone_id=$ROUTE53_ZONE_ID")
+      fi
       if ! terraform -chdir="$ROOT_DIR/infra/terraform" output acm_validation_records >/dev/null 2>&1; then
         terraform -chdir="$ROOT_DIR/infra/terraform" apply \
-          -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" \
+          "${vars_args[@]}" \
           -target=aws_acm_certificate.this
       fi
       terraform -chdir="$ROOT_DIR/infra/terraform" output acm_validation_records
+      exit 0
+      ;;
+
+    zoneid)
+      # Show Route53 hosted zone IDs for the domain in envs/<ENV>.tfvars.
+      domain_name="$(awk -F'=' '/^domain_name/ {gsub(/[[:space:]\"]/, "", $2); print $2; exit}' "$ROOT_DIR/infra/terraform/envs/$ENV.tfvars")"
+      if [ -z "$domain_name" ]; then
+        domain_name="threadbrief.com"
+      fi
+      aws route53 list-hosted-zones-by-name \
+        --dns-name "$domain_name" \
+        --query "HostedZones[?Name=='${domain_name}.']|[].[Id,Name,Config.PrivateZone,ResourceRecordSetCount]" \
+        --output table
+      echo "Set route53_zone_id in infra/terraform/envs/$ENV.tfvars to the correct public zone ID (strip /hostedzone/ prefix)."
       exit 0
       ;;
 
@@ -414,6 +443,10 @@ if [ "$ENV" != "dev" ]; then
       echo "[$ENV] Terraform destroy..."
       tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
       AWS_REGION="${AWS_REGION:-ap-southeast-2}"
+      vars_args=(-var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars")
+      if [ -n "${ROUTE53_ZONE_ID:-}" ]; then
+        vars_args+=(-var "route53_zone_id=$ROUTE53_ZONE_ID")
+      fi
 
       if [ "$ENV" = "prod" ]; then
         # Keep Route53 zone, but remove it from state so destroy does not block.
@@ -428,9 +461,9 @@ if [ "$ENV" != "dev" ]; then
         if aws ecr describe-repositories --region "$AWS_REGION" --repository-names "threadbrief-$ENV-web" >/dev/null 2>&1; then
           ecr_targets+=(-target=aws_ecr_repository.web)
         fi
-        if [ "${#ecr_targets[@]}" -gt 0 ]; then
-          terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" "${ecr_targets[@]}" -auto-approve
-        fi
+      if [ "${#ecr_targets[@]}" -gt 0 ]; then
+        terraform -chdir="$ROOT_DIR/infra/terraform" apply "${vars_args[@]}" "${ecr_targets[@]}" -auto-approve
+      fi
       fi
 
       # Stage uses an imported ECS service-linked role sometimes; remove it from state
@@ -440,7 +473,7 @@ if [ "$ENV" != "dev" ]; then
       fi
 
       log_path="$(tf_log_path "$ENV" "down" "$ROOT_DIR/infra/terraform")"
-      terraform -chdir="$ROOT_DIR/infra/terraform" destroy -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" -auto-approve 2>&1 | tee "$log_path"
+      terraform -chdir="$ROOT_DIR/infra/terraform" destroy "${vars_args[@]}" -auto-approve 2>&1 | tee "$log_path"
       echo "[$ENV] Terraform log: $log_path"
       exit 0
       ;;
@@ -465,7 +498,11 @@ if [ "$ENV" != "dev" ]; then
     plan)
       # Show what terraform WOULD change, without applying
       tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
-      if ! terraform -chdir="$ROOT_DIR/infra/terraform" plan -var-file="envs/$ENV.tfvars"; then
+      vars_args=(-var-file="envs/$ENV.tfvars")
+      if [ -n "${ROUTE53_ZONE_ID:-}" ]; then
+        vars_args+=(-var "route53_zone_id=$ROUTE53_ZONE_ID")
+      fi
+      if ! terraform -chdir="$ROOT_DIR/infra/terraform" plan "${vars_args[@]}"; then
         echo "[$ENV] Plan failed. If the state is locked, run: sh bin/tools.sh $ENV unlock <lock_id>" >&2
         exit 1
       fi
@@ -582,6 +619,9 @@ if [ "$ENV" != "dev" ]; then
       VARS_ARGS=(-var-file="$TF_DIR/envs/$ENV.tfvars")
       if [ -f "$TF_DIR/envs/$ENV.local.tfvars" ]; then
         VARS_ARGS+=(-var-file="$TF_DIR/envs/$ENV.local.tfvars")
+      fi
+      if [ -n "${ROUTE53_ZONE_ID:-}" ]; then
+        VARS_ARGS+=(-var "route53_zone_id=$ROUTE53_ZONE_ID")
       fi
 
       # Some values are provided as TF vars from local files (cookies/proxy)

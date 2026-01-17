@@ -86,3 +86,9 @@ variable "manage_hosted_zone" {
   description = "Whether this env owns/creates the Route53 hosted zone."
   default     = false
 }
+
+variable "route53_zone_id" {
+  type        = string
+  description = "Existing Route53 hosted zone ID to use (avoids duplicate zones)."
+  default     = ""
+}

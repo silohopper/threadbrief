@@ -28,6 +28,15 @@ Terraform workspaces (`stage`, `prod`) so resources don’t overwrite each other
 
 From now on, use `sh bin/tools.sh stage ...` and `sh bin/tools.sh prod ...` only.
 
+## Known issues (temporary)
+- Route53 hosted zone duplication: if multiple public zones exist for
+  `threadbrief.com`, Terraform may pick the wrong one. For now, set
+  `route53_zone_id` in `infra/terraform/envs/prod.tfvars` to the correct public
+  hosted zone ID (strip the `/hostedzone/` prefix). Use:
+  ```bash
+  sh bin/tools.sh prod zoneid
+  ```
+
 ## Step 2) Create the IAM policy and group (console)
 This creates a least-privilege policy and a group that uses it.
 
