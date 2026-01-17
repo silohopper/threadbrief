@@ -80,3 +80,9 @@ variable "web_base_url" {
   description = "Base URL for share links."
   default     = ""
 }
+
+variable "manage_hosted_zone" {
+  type        = bool
+  description = "Whether this env owns/creates the Route53 hosted zone."
+  default     = false
+}

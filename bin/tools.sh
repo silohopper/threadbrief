@@ -1,33 +1,69 @@
 #!/bin/bash
+# -----------------------------------------------------------------------------
 # ThreadBrief tools.sh
-# Usage:
-#   sh bin/tools.sh dev up
-#   sh bin/tools.sh dev down
-#   sh bin/tools.sh dev logs web
-#   sh bin/tools.sh dev shell api
-#   sh bin/tools.sh dev lint
-#   sh bin/tools.sh dev test
+#
+# This is the "one script to rule them all" for:
+#   - Local dev (Docker Compose)
+#   - Stage/Prod infra (Terraform + AWS CLI)
+#   - Deployment (build images, push to ECR, restart ECS)
+#
+# Why it exists:
+#   You run simple commands like:
+#     sh bin/tools.sh dev up
+#     sh bin/tools.sh prod up
+#     sh bin/tools.sh prod deploy
+#
+# And it handles all the messy differences between environments.
+# -----------------------------------------------------------------------------
 
 set -euo pipefail
-# Enable verbose execution for prod
+# -e : exit immediately if a command fails (prevents silent broken states)
+# -u : treat unset variables as errors (prevents typos becoming "empty strings")
+# -o pipefail : if any part of a piped command fails, the whole pipe fails
+
+# Enable verbose execution ONLY for prod.
+# This prints each command before it runs so you can see what it's doing.
 [ "${1:-}" = "prod" ] && set -x
 
+# Resolve the project root directory (folder that contains env/, infra/, services/, etc)
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Parse CLI args:
+#   ENV = dev|stage|prod
+#   CMD = command like up/down/deploy/logs/etc
+#   ARG = optional third argument (usually service name like web/api)
 ENV="${1:-}"
 CMD="${2:-}"
 ARG="${3:-}"
+
+# Pretty colors for error messages (only used in a few spots)
 RED="\033[31m"
 RESET="\033[0m"
 
-# Binaries
+# -----------------------------------------------------------------------------
+# Detect whether Docker + docker compose is available
+# -----------------------------------------------------------------------------
 DOCKER_BIN="$(command -v docker || true)"
 DOCKER_COMPOSE_BIN="$(command -v docker-compose || true)"
 HAS_DOCKER_COMPOSE_PLUGIN=false
 
+# Newer Docker uses: "docker compose" (plugin)
+# Older setups might have: "docker-compose" (separate binary)
 if [ -n "$DOCKER_BIN" ] && "$DOCKER_BIN" compose version >/dev/null 2>&1; then
   HAS_DOCKER_COMPOSE_PLUGIN=true
 fi
 
+# -----------------------------------------------------------------------------
+# compose <env> <docker compose args...>
+#
+# This wrapper chooses the right compose command automatically:
+#   - If "docker compose" exists, use that
+#   - Else if "docker-compose" exists, use that
+#   - Else error out
+#
+# It also pins the correct compose file:
+#   env/<env>/docker-compose.yml
+# -----------------------------------------------------------------------------
 compose() {
   local env="$1"
   shift
@@ -46,6 +82,10 @@ compose() {
   exit 1
 }
 
+# -----------------------------------------------------------------------------
+# help()
+# Prints usage and command list
+# -----------------------------------------------------------------------------
 help() {
   cat <<'EOF'
 SYNOPSIS
@@ -69,10 +109,10 @@ COMMANDS (dev)
   build             build web + api images
 
 COMMANDS (stage/prod)
-  up                placeholder (Terraform coming next)
-  down              placeholder (Terraform coming next)
-  deploy            placeholder
-  destroy           placeholder
+  up                terraform apply (creates/updates infra)
+  down              terraform destroy (tears down infra)
+  deploy            build/push images to ECR + restart ECS services
+  destroy           alias of down
   plan              terraform plan with correct var-file
   status            show terraform state/lock status
   tail              tail terraform logs for the last up/down action
@@ -99,17 +139,32 @@ EXAMPLES
 EOF
 }
 
+# -----------------------------------------------------------------------------
+# Terraform helpers
+# -----------------------------------------------------------------------------
+
+# tf_init_select_workspace <env> <tf_dir>
+#
+# Terraform uses "workspaces" to maintain separate state for dev/stage/prod.
+# This function ensures:
+#   - terraform init has run
+#   - workspace exists and is selected
 tf_init_select_workspace() {
   local env="$1"
   local tf_dir="$2"
 
   terraform -chdir="$tf_dir" init
+
+  # If workspace exists, select it. If not, create it.
   if terraform -chdir="$tf_dir" workspace select "$env" >/dev/null 2>&1; then
     return
   fi
   terraform -chdir="$tf_dir" workspace new "$env" >/dev/null
 }
 
+# tf_log_path <env> <action> <tf_dir>
+#
+# Writes Terraform output to a timestamped log file so you can inspect later.
 tf_log_path() {
   local env="$1"
   local action="$2"
@@ -119,6 +174,19 @@ tf_log_path() {
   echo "$log_dir/${env}-${action}-$(date +%Y%m%d-%H%M%S).log"
 }
 
+# -----------------------------------------------------------------------------
+# tf_resync_state <env> <tf_dir>
+#
+# "Resync" imports existing AWS resources into Terraform state.
+#
+# Why do we need this?
+# Terraform gets angry if it tries to create something that already exists
+# (example: existing SG / existing ECR repo / existing target group).
+#
+# For prod especially, you sometimes have leftovers or you created stuff once,
+# and Terraform state doesn't know about it yet. This function tries to import
+# the common resources so Terraform will "adopt" them instead of duplicating.
+# -----------------------------------------------------------------------------
 tf_resync_state() {
   local env="$1"
   local tf_dir="$2"
@@ -126,33 +194,56 @@ tf_resync_state() {
   tf_init_select_workspace "$env" "$tf_dir"
   AWS_REGION="${AWS_REGION:-ap-southeast-2}"
 
+  # try_import <terraform_resource_address> <aws_id>
+  # Import is "best effort": ignore errors so the script keeps going.
   try_import() {
     local addr="$1"
     local id="$2"
     terraform -chdir="$tf_dir" import "$addr" "$id" >/dev/null 2>&1 || true
   }
 
-  # ----------------------------
+  # ---------------------------------------------------------------------------
   # MINIMAL FIX: Prevent Route53 hosted-zone duplication.
-  # If threadbrief.com hosted zone already exists in AWS, import it into Terraform state
-  # so "terraform apply" reuses it instead of creating a new hosted zone.
   #
-  # NOTE: This assumes your Terraform has a resource address like: aws_route53_zone.this
-  # If your address is different, change aws_route53_zone.this below accordingly.
-  # ----------------------------
+  # Problem you hit:
+  #   Running "prod up" was creating NEW hosted zones in Route53 (duplicates).
+  #
+  # Root cause:
+  #   Terraform only knows what’s in its state.
+  #   If a hosted zone exists in AWS but NOT in Terraform state, Terraform may
+  #   decide it needs to "create" one (boom, new zone).
+  #
+  # Fix approach:
+  #   If a zone already exists, IMPORT it into terraform state BEFORE apply.
+  #
+  # NOTE 1:
+  #   This uses resource address "aws_route53_zone.this".
+  #   If your Terraform resource has a different name, change it.
+  #
+  # NOTE 2 (important for later):
+  #   AWS can have both PUBLIC and PRIVATE zones with the same name.
+  #   If you ever create a private zone, this query might grab the wrong one.
+  #   If duplicates happen again, filter for Config.PrivateZone==false.
+  # ---------------------------------------------------------------------------
   if [ "$env" = "prod" ]; then
     hz_id="$(aws route53 list-hosted-zones-by-name \
       --dns-name threadbrief.com \
       --query "HostedZones[?Name=='threadbrief.com.']|[0].Id" \
       --output text 2>/dev/null || true)"
     if [ -n "$hz_id" ] && [ "$hz_id" != "None" ]; then
+      # AWS returns hosted zone ID like "/hostedzone/Z123..."
+      # Terraform import expects "Z123..."
       hz_id="${hz_id#/hostedzone/}"
       try_import aws_route53_zone.this "$hz_id"
     fi
   fi
-  # ----------------------------
+  # ---------------------------------------------------------------------------
 
+  # Find default VPC ID (this script assumes you're using the default VPC)
   vpc_id="$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text 2>/dev/null || true)"
+
+  # If we have a VPC, look for the ALB security group we expect by name:
+  # "threadbrief-<env>-alb"
   if [ -n "$vpc_id" ] && [ "$vpc_id" != "None" ]; then
     sg_id="$(aws ec2 describe-security-groups --filters Name=group-name,Values="threadbrief-$env-alb" Name=vpc-id,Values="$vpc_id" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)"
     if [ -n "$sg_id" ] && [ "$sg_id" != "None" ]; then
@@ -160,6 +251,8 @@ tf_resync_state() {
     fi
   fi
 
+  # CloudWatch log groups (ECS tasks write logs to these)
+  # We import them if they exist to prevent Terraform trying to recreate.
   for log_group in "/ecs/threadbrief/$env/api" "/ecs/threadbrief/$env/web"; do
     lg_name="$(aws logs describe-log-groups --log-group-name-prefix "$log_group" --query "logGroups[?logGroupName=='$log_group']|[0].logGroupName" --output text 2>/dev/null || true)"
     if [ -n "$lg_name" ] && [ "$lg_name" != "None" ]; then
@@ -171,11 +264,13 @@ tf_resync_state() {
     fi
   done
 
+  # ALB import (load balancer)
   lb_arn="$(aws elbv2 describe-load-balancers --names "threadbrief-$env" --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || true)"
   if [ -n "$lb_arn" ] && [ "$lb_arn" != "None" ]; then
     try_import aws_lb.this "$lb_arn"
   fi
 
+  # Target groups import (ALB forwards to these)
   api_tg_arn="$(aws elbv2 describe-target-groups --names "threadbrief-$env-api" --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || true)"
   if [ -n "$api_tg_arn" ] && [ "$api_tg_arn" != "None" ]; then
     try_import aws_lb_target_group.api "$api_tg_arn"
@@ -186,13 +281,21 @@ tf_resync_state() {
     try_import aws_lb_target_group.web "$web_tg_arn"
   fi
 
+  # ECR repos (where Docker images live)
   try_import aws_ecr_repository.api "threadbrief-$env-api"
   try_import aws_ecr_repository.web "threadbrief-$env-web"
+
+  # IAM roles (ECS task role and execution role)
   try_import aws_iam_role.task "threadbrief-$env-task"
   try_import aws_iam_role.task_execution "threadbrief-$env-task-exec"
+
+  # ECS service-linked role (AWS-managed role ECS needs)
   try_import aws_iam_service_linked_role.ecs "ecs.amazonaws.com"
 }
 
+# -----------------------------------------------------------------------------
+# Argument validation
+# -----------------------------------------------------------------------------
 if [ -z "$ENV" ] || [ -z "$CMD" ]; then
   printf "%bNot enough arguments. Usage: sh bin/tools.sh <env> <command> [service]%b\n" "$RED" "$RESET"
   if [ -z "$ENV" ]; then
@@ -205,42 +308,65 @@ if [ -z "$ENV" ] || [ -z "$CMD" ]; then
   exit 1
 fi
 
+# Only allow these env values
 case "$ENV" in
   dev|stage|prod) ;;
   *) echo "Unknown env: $ENV"; help; exit 1 ;;
 esac
 
+# -----------------------------------------------------------------------------
+# Stage/Prod commands (Terraform/AWS)
+#
+# Any env != dev goes through this path.
+# -----------------------------------------------------------------------------
 if [ "$ENV" != "dev" ]; then
   case "$CMD" in
     up)
+      # Creates/updates infrastructure via Terraform
       echo "[$ENV] Terraform apply..."
       tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
+
+      # Prod gets special handling:
+      #   - import existing resources into Terraform state before apply
       if [ "$ENV" = "prod" ]; then
         echo "[$ENV] Importing existing resources into state..."
         tf_resync_state "$ENV" "$ROOT_DIR/infra/terraform"
       else
+        # For stage, import the ECS service linked role (some accounts already have it)
         slr_arn="arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS"
         terraform -chdir="$ROOT_DIR/infra/terraform" import -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" aws_iam_service_linked_role.ecs "$slr_arn" >/dev/null 2>&1 || true
       fi
+
+      # Optional manual resync (RESYNC=1 sh bin/tools.sh prod up)
       if [ "${RESYNC:-}" = "1" ]; then
         echo "[$ENV] Resyncing existing resources into state..."
         tf_resync_state "$ENV" "$ROOT_DIR/infra/terraform"
       fi
+
+      # Log the entire terraform apply output
       log_path="$(tf_log_path "$ENV" "up" "$ROOT_DIR/infra/terraform")"
+
+      # Run terraform apply; if it fails, try resync and retry once
       if ! terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" -auto-approve 2>&1 | tee "$log_path"; then
         echo "[$ENV] Apply failed; attempting resync and retry..." >&2
         tf_resync_state "$ENV" "$ROOT_DIR/infra/terraform"
         terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" -auto-approve 2>&1 | tee -a "$log_path"
       fi
+
       echo "[$ENV] Terraform log: $log_path"
       exit 0
       ;;
+
     dns)
+      # Prints the Route53 name servers Terraform created/uses
       tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
       terraform -chdir="$ROOT_DIR/infra/terraform" output route53_name_servers
       exit 0
       ;;
+
     cert)
+      # For ACM certificates, you often need validation records.
+      # This prints out the CNAME validation records Terraform expects.
       tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
       if ! terraform -chdir="$ROOT_DIR/infra/terraform" output acm_validation_records >/dev/null 2>&1; then
         terraform -chdir="$ROOT_DIR/infra/terraform" apply \
@@ -250,10 +376,15 @@ if [ "$ENV" != "dev" ]; then
       terraform -chdir="$ROOT_DIR/infra/terraform" output acm_validation_records
       exit 0
       ;;
+
     down|destroy)
+      # Tear down infrastructure via terraform destroy
       echo "[$ENV] Terraform destroy..."
       tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
       AWS_REGION="${AWS_REGION:-ap-southeast-2}"
+
+      # Some accounts block destroy if ECR repos contain images or have settings.
+      # This does a targeted apply that ensures ECR repos are tracked correctly.
       ecr_targets=()
       if aws ecr describe-repositories --region "$AWS_REGION" --repository-names "threadbrief-$ENV-api" >/dev/null 2>&1; then
         ecr_targets+=(-target=aws_ecr_repository.api)
@@ -264,20 +395,28 @@ if [ "$ENV" != "dev" ]; then
       if [ "${#ecr_targets[@]}" -gt 0 ]; then
         terraform -chdir="$ROOT_DIR/infra/terraform" apply -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" "${ecr_targets[@]}" -auto-approve
       fi
+
+      # Stage uses an imported ECS service-linked role sometimes; remove it from state
+      # so destroy doesn't try to delete the AWS-managed role (often not allowed).
       if [ "$ENV" != "prod" ]; then
         terraform -chdir="$ROOT_DIR/infra/terraform" state rm aws_iam_service_linked_role.ecs >/dev/null 2>&1 || true
       fi
+
       log_path="$(tf_log_path "$ENV" "down" "$ROOT_DIR/infra/terraform")"
       terraform -chdir="$ROOT_DIR/infra/terraform" destroy -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" -auto-approve 2>&1 | tee "$log_path"
       echo "[$ENV] Terraform log: $log_path"
       exit 0
       ;;
+
     resync)
+      # Manually import resources into state
       echo "[$ENV] Resyncing existing resources into state..."
       tf_resync_state "$ENV" "$ROOT_DIR/infra/terraform"
       exit 0
       ;;
+
     unlock)
+      # If Terraform crashed mid-run, the state can be locked. This clears it.
       if [ -z "${ARG:-}" ]; then
         echo "Missing lock id for unlock."
         exit 1
@@ -285,7 +424,9 @@ if [ "$ENV" != "dev" ]; then
       terraform -chdir="$ROOT_DIR/infra/terraform" force-unlock "$ARG"
       exit 0
       ;;
+
     plan)
+      # Show what terraform WOULD change, without applying
       tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
       if ! terraform -chdir="$ROOT_DIR/infra/terraform" plan -var-file="envs/$ENV.tfvars"; then
         echo "[$ENV] Plan failed. If the state is locked, run: sh bin/tools.sh $ENV unlock <lock_id>" >&2
@@ -293,7 +434,9 @@ if [ "$ENV" != "dev" ]; then
       fi
       exit 0
       ;;
+
     status)
+      # Quick diagnostics: state file + lock file if present
       tf_dir="$ROOT_DIR/infra/terraform"
       lock_file="$tf_dir/terraform.tfstate.d/$ENV/.terraform.tfstate.lock.info"
       state_file="$tf_dir/terraform.tfstate.d/$ENV/terraform.tfstate"
@@ -312,7 +455,9 @@ if [ "$ENV" != "dev" ]; then
       fi
       exit 0
       ;;
+
     tail)
+      # Tail the latest terraform up/down log file
       tf_dir="$ROOT_DIR/infra/terraform"
       log_dir="$tf_dir/logs"
       if [ ! -d "$log_dir" ]; then
@@ -328,7 +473,9 @@ if [ "$ENV" != "dev" ]; then
       tail -f "$log_file"
       exit 0
       ;;
+
     logs)
+      # CloudWatch logs tail (ECS task logs)
       if [ -z "${ARG:-}" ]; then
         echo "Missing service for logs (api|web)."
         exit 1
@@ -340,7 +487,9 @@ if [ "$ENV" != "dev" ]; then
       aws logs tail "/ecs/threadbrief/$ENV/$ARG" --since 10m
       exit 0
       ;;
+
     elb)
+      # Debug ALB + listeners + target health
       lb_name="threadbrief-$ENV"
       lb_arn="$(aws elbv2 describe-load-balancers --names "$lb_name" --query "LoadBalancers[0].LoadBalancerArn" --output text)"
       echo "Load balancer: $lb_name"
@@ -358,16 +507,27 @@ if [ "$ENV" != "dev" ]; then
       aws elbv2 describe-target-health --target-group-arn "$web_tg"
       exit 0
       ;;
+
     deploy)
+      # Deploy pipeline:
+      #   1) Ensure secrets are restored/imported (so Terraform apply won't fail)
+      #   2) Terraform apply (creates infra if missing)
+      #   3) Get ECR repo URLs + ECS service names from Terraform outputs
+      #   4) docker build + docker push API + WEB images
+      #   5) force-new-deployment on ECS services
       echo "[$ENV] Deploying images to ECR and updating ECS services..."
       AWS_REGION="${AWS_REGION:-ap-southeast-2}"
       TAG="${TAG:-latest}"
       TF_DIR="$ROOT_DIR/infra/terraform"
+
+      # If Docker isn't running, build/push can't work
       if ! docker info >/dev/null 2>&1; then
         echo "Docker daemon not running. Start Docker Desktop and retry." >&2
         exit 1
       fi
+
       # Auto-restore secrets that are scheduled for deletion so apply can recreate/attach them.
+      # (AWS Secrets Manager lets you schedule deletion; restore cancels it.)
       for secret_name in \
         "threadbrief/$ENV/gemini_api_key" \
         "threadbrief/$ENV/ytdlp_cookies" \
@@ -378,10 +538,16 @@ if [ "$ENV" != "dev" ]; then
           fi
         fi
       done
+
+      # Collect terraform var files:
+      #   envs/<ENV>.tfvars is required
+      #   envs/<ENV>.local.tfvars optional override (not committed, usually)
       VARS_ARGS=(-var-file="$TF_DIR/envs/$ENV.tfvars")
       if [ -f "$TF_DIR/envs/$ENV.local.tfvars" ]; then
         VARS_ARGS+=(-var-file="$TF_DIR/envs/$ENV.local.tfvars")
       fi
+
+      # Some values are provided as TF vars from local files (cookies/proxy)
       COOKIES_FILE="$ROOT_DIR/env/$ENV/cookies.txt"
       if [ ! -f "$COOKIES_FILE" ]; then
         COOKIES_FILE="$ROOT_DIR/env/dev/cookies.txt"
@@ -390,6 +556,7 @@ if [ "$ENV" != "dev" ]; then
         export TF_VAR_ytdlp_cookies="$(cat "$COOKIES_FILE")"
         VARS_ARGS+=(-var "ytdlp_cookies=$TF_VAR_ytdlp_cookies")
       fi
+
       PROXY_FILE="$ROOT_DIR/env/$ENV/proxy.txt"
       if [ ! -f "$PROXY_FILE" ]; then
         PROXY_FILE="$ROOT_DIR/env/dev/proxy.txt"
@@ -400,6 +567,7 @@ if [ "$ENV" != "dev" ]; then
       fi
 
       # Import any existing secrets into state so apply doesn't fail on duplicates.
+      # This is the exact same concept as Route53 zones: "if it exists, import it first"
       for secret_name in \
         "threadbrief/$ENV/gemini_api_key:aws_secretsmanager_secret.gemini[0]" \
         "threadbrief/$ENV/ytdlp_cookies:aws_secretsmanager_secret.ytdlp_cookies[0]" \
@@ -414,14 +582,18 @@ if [ "$ENV" != "dev" ]; then
         fi
       done
 
+      # Optionally resync before apply (RESYNC=1)
       if [ "${RESYNC:-}" = "1" ]; then
         echo "[$ENV] Resyncing existing resources into state..."
         tf_resync_state "$ENV" "$TF_DIR"
       else
         tf_init_select_workspace "$ENV" "$TF_DIR"
       fi
+
+      # Apply infra
       terraform -chdir="$TF_DIR" apply "${VARS_ARGS[@]}" -auto-approve
 
+      # Pull outputs from terraform (source of truth for repo URLs + service names)
       api_repo="$(terraform -chdir="$TF_DIR" output -raw api_ecr_url)"
       web_repo="$(terraform -chdir="$TF_DIR" output -raw web_ecr_url)"
       cluster_name="$(terraform -chdir="$TF_DIR" output -raw ecs_cluster_name)"
@@ -429,13 +601,16 @@ if [ "$ENV" != "dev" ]; then
       web_service="$(terraform -chdir="$TF_DIR" output -raw web_service_name)"
       api_domain="$(terraform -chdir="$TF_DIR" output -raw api_domain)"
 
+      # Login to ECR (auth token)
       aws ecr get-login-password --region "$AWS_REGION" \
         | docker login --username AWS --password-stdin "${api_repo%/*}"
 
+      # Build + push API container
       echo "[BUILD] API image"
       docker build -t "$api_repo:$TAG" "$ROOT_DIR/services/api"
       docker push "$api_repo:$TAG"
 
+      # Build + push WEB container (inject API base URL into Next.js build)
       echo "[BUILD] WEB image"
       docker build -t "$web_repo:$TAG" \
         --build-arg NEXT_PUBLIC_API_BASE_URL="https://${api_domain}" \
@@ -443,20 +618,26 @@ if [ "$ENV" != "dev" ]; then
         "$ROOT_DIR/services/web"
       docker push "$web_repo:$TAG"
 
+      # Restart ECS services so they pull the new image tag
       echo "[DEPLOY] Updating ECS services"
       aws ecs update-service --cluster "$cluster_name" --service "$api_service" --force-new-deployment > /dev/null
       aws ecs update-service --cluster "$cluster_name" --service "$web_service" --force-new-deployment > /dev/null
+
       echo "[DONE] Deploy triggered for $ENV (tag=$TAG)"
       exit 0
       ;;
+
     *) echo "Unknown command for $ENV: $CMD"; help; exit 1 ;;
   esac
 fi
 
-# DEV commands
+# -----------------------------------------------------------------------------
+# DEV commands (Docker compose local workflow)
+# -----------------------------------------------------------------------------
 case "$CMD" in
   up)
     echo "[DEV] Starting containers..."
+    # If cookies/proxy exist locally, export them so containers can use them
     if [ -f "$ROOT_DIR/env/dev/cookies.txt" ]; then
       export YTDLP_COOKIES="$(cat "$ROOT_DIR/env/dev/cookies.txt")"
     fi
@@ -465,10 +646,12 @@ case "$CMD" in
     fi
     compose dev up -d --build
     ;;
+
   down)
     echo "[DEV] Stopping containers..."
     compose dev down
     ;;
+
   restart)
     echo "[DEV] Restarting containers..."
     compose dev down
@@ -480,33 +663,40 @@ case "$CMD" in
     fi
     compose dev up -d --build
     ;;
+
   ps)
     compose dev ps
     ;;
+
   logs)
     if [ -z "${ARG:-}" ]; then echo "Missing service for logs (web|api)"; exit 1; fi
     compose dev logs -f "$ARG"
     ;;
+
   shell)
     if [ -z "${ARG:-}" ]; then echo "Missing service for shell (web|api)"; exit 1; fi
     compose dev exec "$ARG" sh
     ;;
+
   lint)
     echo "[DEV] Linting API..."
     compose dev exec -T api sh -lc "ruff check . && mypy app"
     echo "[DEV] Linting WEB..."
     compose dev exec -T web sh -lc "npm run lint"
     ;;
+
   format)
     echo "[DEV] Formatting API..."
     compose dev exec -T api sh -lc "ruff format ."
     echo "[DEV] Formatting WEB..."
     compose dev exec -T web sh -lc "npm run format || true"
     ;;
+
   test)
     echo "[DEV] Running API tests..."
     compose dev exec -T api sh -lc "pytest -q"
     ;;
+
   test-youtube)
     echo "[DEV] Running YouTube integration test..."
     proxy_env=""
@@ -515,14 +705,17 @@ case "$CMD" in
     fi
     compose dev exec -T api sh -lc "$proxy_env YOUTUBE_INTEGRATION=1 pytest -q -k youtube -s"
     ;;
+
   test-gemini)
     echo "[DEV] Running Gemini integration test..."
     compose dev exec -T api sh -lc "GEMINI_INTEGRATION=1 pytest -q -k gemini -s"
     ;;
+
   build)
     echo "[DEV] Building images..."
     compose dev build
     ;;
+
   *)
     echo "Unknown dev command: $CMD"
     help

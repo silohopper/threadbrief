@@ -4,7 +4,7 @@ output "alb_dns_name" {
 }
 
 output "route53_name_servers" {
-  value       = aws_route53_zone.this.name_servers
+  value       = local.hosted_zone_name_servers
   description = "Route53 name servers to set in GoDaddy."
 }
 

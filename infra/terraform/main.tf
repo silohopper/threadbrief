@@ -9,6 +9,11 @@ data "aws_subnets" "default" {
   }
 }
 
+data "aws_route53_zone" "this" {
+  count = var.manage_hosted_zone ? 0 : 1
+  name  = var.domain_name
+}
+
 locals {
   api_base_url  = "https://${var.api_domain}"
   web_base_url  = var.web_base_url != "" ? var.web_base_url : "https://${var.web_domain}"
@@ -19,6 +24,8 @@ locals {
   cookies_secret_arn = try(aws_secretsmanager_secret.ytdlp_cookies[0].arn, null)
   proxy_secret_arn   = try(aws_secretsmanager_secret.ytdlp_proxy[0].arn, null)
   secret_arns        = compact([local.gemini_secret_arn, local.cookies_secret_arn, local.proxy_secret_arn])
+  hosted_zone_id     = var.manage_hosted_zone ? aws_route53_zone.this[0].zone_id : data.aws_route53_zone.this[0].zone_id
+  hosted_zone_name_servers = var.manage_hosted_zone ? aws_route53_zone.this[0].name_servers : data.aws_route53_zone.this[0].name_servers
   api_env = concat(
     [
       { name = "APP_ENV", value = var.env },
@@ -332,6 +339,7 @@ resource "aws_acm_certificate" "this" {
 }
 
 resource "aws_route53_zone" "this" {
+  count = var.manage_hosted_zone ? 1 : 0
   name = var.domain_name
   lifecycle {
     prevent_destroy = true
@@ -346,7 +354,7 @@ resource "aws_route53_record" "cert_validation" {
       record = dvo.resource_record_value
     }
   }
-  zone_id = aws_route53_zone.this.zone_id
+  zone_id = local.hosted_zone_id
   name    = each.value.name
   type    = each.value.type
   ttl     = 60
@@ -437,7 +445,7 @@ resource "aws_ecs_service" "web" {
 }
 
 resource "aws_route53_record" "web" {
-  zone_id = aws_route53_zone.this.zone_id
+  zone_id = local.hosted_zone_id
   name    = var.web_domain
   type    = "A"
   alias {
@@ -448,7 +456,7 @@ resource "aws_route53_record" "web" {
 }
 
 resource "aws_route53_record" "api" {
-  zone_id = aws_route53_zone.this.zone_id
+  zone_id = local.hosted_zone_id
   name    = var.api_domain
   type    = "A"
   alias {
