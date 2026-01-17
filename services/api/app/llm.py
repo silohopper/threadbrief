@@ -83,7 +83,7 @@ async def generate_brief_gemini(api_key: str, prompt: str) -> str:
     max_retries = int(os.getenv("GEMINI_MAX_RETRIES", "3"))
     backoff = float(os.getenv("GEMINI_RETRY_BACKOFF", "1.0"))
 
-    async with httpx.AsyncClient(timeout=45) as client:
+    async with httpx.AsyncClient(timeout=900) as client:
         for attempt in range(max_retries + 1):
             r = await client.post(url, headers=headers, json=payload)
             if r.status_code in {429, 500, 502, 503, 504} and attempt < max_retries:

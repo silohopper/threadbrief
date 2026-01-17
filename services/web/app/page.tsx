@@ -81,7 +81,7 @@ export default function HomePage() {
         length,
         output_language: outputLanguage,
       };
-      const res = await axios.post(`${API_BASE}/v1/briefs`, payload, { timeout: 180000 });
+      const res = await axios.post(`${API_BASE}/v1/briefs`, payload, { timeout: 900000 });
       setBrief(res.data);
     } catch (e: any) {
       const msg =

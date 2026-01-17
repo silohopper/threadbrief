@@ -85,7 +85,7 @@ def _download_youtube_audio(url: str, workdir: str) -> Path:
         logger.info("yt-dlp extra args=%s", extra_args)
     if extra_args:
         cmd.extend(extra_args)
-    ytdlp_timeout = int(os.getenv("YTDLP_TIMEOUT_SECONDS", "300"))
+    ytdlp_timeout = int(os.getenv("YTDLP_TIMEOUT_SECONDS", "900"))
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=ytdlp_timeout)
     except subprocess.TimeoutExpired as exc:
@@ -136,7 +136,7 @@ def _transcribe_audio(audio_path: Path) -> str:
     if language:
         cmd.extend(["--language", language])
 
-    whisper_timeout = int(os.getenv("WHISPER_TIMEOUT_SECONDS", "300"))
+    whisper_timeout = int(os.getenv("WHISPER_TIMEOUT_SECONDS", "900"))
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=whisper_timeout)
     except subprocess.TimeoutExpired as exc:
