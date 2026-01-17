@@ -9,6 +9,8 @@
 #   sh bin/tools.sh dev test
 
 set -euo pipefail
+# Enable verbose execution for prod
+[ "${1:-}" = "prod" ] && set -x
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV="${1:-}"
@@ -129,6 +131,26 @@ tf_resync_state() {
     local id="$2"
     terraform -chdir="$tf_dir" import "$addr" "$id" >/dev/null 2>&1 || true
   }
+
+  # ----------------------------
+  # MINIMAL FIX: Prevent Route53 hosted-zone duplication.
+  # If threadbrief.com hosted zone already exists in AWS, import it into Terraform state
+  # so "terraform apply" reuses it instead of creating a new hosted zone.
+  #
+  # NOTE: This assumes your Terraform has a resource address like: aws_route53_zone.this
+  # If your address is different, change aws_route53_zone.this below accordingly.
+  # ----------------------------
+  if [ "$env" = "prod" ]; then
+    hz_id="$(aws route53 list-hosted-zones-by-name \
+      --dns-name threadbrief.com \
+      --query "HostedZones[?Name=='threadbrief.com.']|[0].Id" \
+      --output text 2>/dev/null || true)"
+    if [ -n "$hz_id" ] && [ "$hz_id" != "None" ]; then
+      hz_id="${hz_id#/hostedzone/}"
+      try_import aws_route53_zone.this "$hz_id"
+    fi
+  fi
+  # ----------------------------
 
   vpc_id="$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text 2>/dev/null || true)"
   if [ -n "$vpc_id" ] && [ "$vpc_id" != "None" ]; then
