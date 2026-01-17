@@ -328,7 +328,11 @@ tf_resync_state() {
   try_import aws_iam_role.task_execution "threadbrief-$env-task-exec"
 
   # ECS service-linked role (AWS-managed role ECS needs)
-  try_import aws_iam_service_linked_role.ecs "ecs.amazonaws.com"
+  slr_account_id="$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)"
+  if [ -n "$slr_account_id" ] && [ "$slr_account_id" != "None" ]; then
+    slr_arn="arn:aws:iam::${slr_account_id}:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS"
+    try_import aws_iam_service_linked_role.ecs "$slr_arn"
+  fi
 }
 
 # -----------------------------------------------------------------------------
