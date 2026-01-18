@@ -452,12 +452,16 @@ if [ "$ENV" != "dev" ]; then
         vars_args+=(-var "route53_zone_id=$ROUTE53_ZONE_ID")
       fi
 
-      if [ "$ENV" = "prod" ]; then
+      if [ "$ENV" = "prod" ] || [ "$ENV" = "stage" ]; then
         # Keep Route53 zone, but remove it from state so destroy does not block.
+        # Handle both old and count-based addresses.
+        terraform -chdir="$ROOT_DIR/infra/terraform" state rm 'aws_route53_zone.this' >/dev/null 2>&1 || true
         terraform -chdir="$ROOT_DIR/infra/terraform" state rm 'aws_route53_zone.this[0]' >/dev/null 2>&1 || true
-      else
-        # Some accounts block destroy if ECR repos contain images or have settings.
-        # This does a targeted apply that ensures ECR repos are tracked correctly.
+      fi
+
+      # Some accounts block destroy if ECR repos contain images or have settings.
+      # Targeted apply can break when resource addresses shift, so keep it prod-only.
+      if [ "$ENV" = "prod" ]; then
         ecr_targets=()
         if aws ecr describe-repositories --region "$AWS_REGION" --repository-names "threadbrief-$ENV-api" >/dev/null 2>&1; then
           ecr_targets+=(-target=aws_ecr_repository.api)
@@ -465,9 +469,9 @@ if [ "$ENV" != "dev" ]; then
         if aws ecr describe-repositories --region "$AWS_REGION" --repository-names "threadbrief-$ENV-web" >/dev/null 2>&1; then
           ecr_targets+=(-target=aws_ecr_repository.web)
         fi
-      if [ "${#ecr_targets[@]}" -gt 0 ]; then
-        terraform -chdir="$ROOT_DIR/infra/terraform" apply "${vars_args[@]}" "${ecr_targets[@]}" -auto-approve
-      fi
+        if [ "${#ecr_targets[@]}" -gt 0 ]; then
+          terraform -chdir="$ROOT_DIR/infra/terraform" apply "${vars_args[@]}" "${ecr_targets[@]}" -auto-approve
+        fi
       fi
 
       # Stage uses an imported ECS service-linked role sometimes; remove it from state
