@@ -117,6 +117,7 @@ COMMANDS (stage/prod)
   status            show terraform state/lock status
   tail              tail terraform logs for the last up/down action
   zoneid            show Route53 hosted zone IDs for domain_name
+  api-test [url]    POST /v1/briefs and print response/timings
   resync            import existing AWS resources into state
   unlock <lock_id>  force-unlock Terraform state
   logs <svc>        tail CloudWatch logs (api|web)
@@ -439,6 +440,36 @@ if [ "$ENV" != "dev" ]; then
         --query "HostedZones[?Name=='${domain_name}.']|[].[Id,Name,Config.PrivateZone,ResourceRecordSetCount]" \
         --output table
       echo "Set route53_zone_id in infra/terraform/envs/$ENV.tfvars to the correct public zone ID (strip /hostedzone/ prefix)."
+      exit 0
+      ;;
+
+    api-test)
+      # POST a brief request and print response + timings.
+      api_domain="$(awk -F'=' '/^api_domain/ {gsub(/[[:space:]\"]/, "", $2); print $2; exit}' "$ROOT_DIR/infra/terraform/envs/$ENV.tfvars")"
+      if [ -z "$api_domain" ]; then
+        api_domain="api.threadbrief.com"
+      fi
+      api_base="https://${api_domain}"
+      source_url="${ARG:-https://www.youtube.com/watch?v=dQw4w9WgXcQ}"
+      length="${LENGTH:-brief}"
+      mode="${MODE:-insights}"
+      output_language="${OUTPUT_LANGUAGE:-en}"
+      payload=$(cat <<JSON
+{
+  "source_type": "youtube",
+  "source": "${source_url}",
+  "mode": "${mode}",
+  "length": "${length}",
+  "output_language": "${output_language}"
+}
+JSON
+)
+      curl -sS -w "\nHTTP %{http_code}\nTotal %{time_total}s\nConnect %{time_connect}s\nTLS %{time_appconnect}s\nTTFB %{time_starttransfer}s\n" \
+        -X POST "${api_base}/v1/briefs" \
+        -H "Content-Type: application/json" \
+        --max-time 930 \
+        --connect-timeout 10 \
+        -d "$payload"
       exit 0
       ;;
 
