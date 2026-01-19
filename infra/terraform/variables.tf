@@ -92,3 +92,9 @@ variable "route53_zone_id" {
   description = "Existing Route53 hosted zone ID to use (avoids duplicate zones)."
   default     = ""
 }
+
+variable "max_video_minutes" {
+  type        = number
+  description = "Max YouTube video length (minutes) allowed for brief generation."
+  default     = 10
+}

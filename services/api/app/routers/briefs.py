@@ -1,6 +1,7 @@
 """Brief creation and retrieval HTTP endpoints."""
 
 from fastapi import APIRouter, HTTPException, Request
+import logging
 from datetime import datetime, timezone
 from nanoid import generate
 
@@ -13,6 +14,7 @@ from app.llm import build_prompt, generate_brief_gemini, mock_brief
 from app.parse import parse_llm_text
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
@@ -60,6 +62,7 @@ async def create_brief(payload: CreateBriefRequest, request: Request):
         try:
             content = fetch_youtube_transcript(payload.source)
         except TranscriptError as e:
+            logger.warning("Transcript error for source=%s: %s", payload.source, e)
             raise HTTPException(status_code=400, detail=str(e))
     else:
         content = clean_pasted_text(payload.source)

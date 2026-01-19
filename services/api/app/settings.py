@@ -13,6 +13,7 @@ class Settings(BaseModel):
     storage_backend: str = os.getenv("STORAGE_BACKEND", "memory")
     gemini_api_key: str | None = os.getenv("GEMINI_API_KEY")
     rate_limit_per_day: int = int(os.getenv("RATE_LIMIT_PER_DAY", "100"))
+    max_video_minutes: int = int(os.getenv("MAX_VIDEO_MINUTES", "10"))
 
     @property
     def cors_origins_list(self) -> list[str]:

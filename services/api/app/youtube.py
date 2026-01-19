@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from urllib.parse import quote
 from xml.etree.ElementTree import ParseError
+import json
 
 from youtube_transcript_api import (
     YouTubeTranscriptApi,
@@ -96,7 +97,13 @@ def _download_youtube_audio(url: str, workdir: str) -> Path:
             bool(cookies_text),
             bool(proxy_url),
         )
-        stderr = exc.stderr.strip() if exc.stderr else "Unknown yt-dlp error."
+        stderr = exc.stderr.strip() if exc.stderr else ""
+        stdout = exc.stdout.strip() if exc.stdout else ""
+        logger.error("yt-dlp exit=%s stdout=%s stderr=%s", exc.returncode, stdout[:500], stderr[:500])
+        if not stderr and not stdout:
+            stderr = "Unknown yt-dlp error."
+        elif not stderr:
+            stderr = stdout
         raise TranscriptError(f"yt-dlp failed to download audio: {stderr}") from exc
 
     candidates = list(Path(workdir).glob("audio.*"))
@@ -105,6 +112,62 @@ def _download_youtube_audio(url: str, workdir: str) -> Path:
     audio_path = max(candidates, key=lambda path: path.stat().st_size)
     logger.info("Downloaded audio file: %s", audio_path.name)
     return audio_path
+
+
+def _get_youtube_duration_seconds(url: str) -> int | None:
+    """Fetch YouTube duration (seconds) via yt-dlp metadata."""
+    ytdlp = _resolve_executable("yt-dlp", "YTDLP_PATH") or _resolve_executable(
+        "youtube-dl",
+        "YOUTUBEDL_PATH",
+    )
+    if not ytdlp:
+        logger.warning("yt-dlp not found; cannot enforce video length limit.")
+        return None
+
+    cmd = [
+        ytdlp,
+        "--dump-single-json",
+        "--skip-download",
+        "--no-warnings",
+        "--no-playlist",
+        url,
+    ]
+    cookies_text = os.getenv("YTDLP_COOKIES")
+    if cookies_text:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cookies_path = Path(tmpdir) / "cookies.txt"
+            cookies_path.write_text(cookies_text, encoding="utf-8")
+            cmd.extend(["--cookies", str(cookies_path)])
+            proxy_url = os.getenv("YTDLP_PROXY")
+            if proxy_url:
+                cmd.extend(["--proxy", _normalize_proxy(proxy_url)])
+            return _run_ytdlp_meta(cmd)
+
+    proxy_url = os.getenv("YTDLP_PROXY")
+    if proxy_url:
+        cmd.extend(["--proxy", _normalize_proxy(proxy_url)])
+    return _run_ytdlp_meta(cmd)
+
+
+def _run_ytdlp_meta(cmd: list[str]) -> int | None:
+    """Run yt-dlp metadata command and extract duration."""
+    meta_timeout = int(os.getenv("YTDLP_META_TIMEOUT_SECONDS", "60"))
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=meta_timeout)
+    except Exception as exc:
+        logger.warning("yt-dlp metadata failed: %s", exc)
+        return None
+
+    try:
+        info = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        logger.warning("yt-dlp metadata returned invalid JSON.")
+        return None
+
+    duration = info.get("duration")
+    if isinstance(duration, (int, float)):
+        return int(duration)
+    return None
 
 
 def _transcribe_audio(audio_path: Path) -> str:
@@ -142,7 +205,13 @@ def _transcribe_audio(audio_path: Path) -> str:
     except subprocess.TimeoutExpired as exc:
         raise TranscriptError("Whisper timed out while transcribing audio.") from exc
     except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.strip() if exc.stderr else "Unknown Whisper error."
+        stderr = exc.stderr.strip() if exc.stderr else ""
+        stdout = exc.stdout.strip() if exc.stdout else ""
+        logger.error("Whisper exit=%s stdout=%s stderr=%s", exc.returncode, stdout[:500], stderr[:500])
+        if not stderr and not stdout:
+            stderr = "Unknown Whisper error."
+        elif not stderr:
+            stderr = stdout
         raise TranscriptError(f"Whisper transcription failed: {stderr}") from exc
 
     transcript_path = output_dir / f"{audio_path.stem}.txt"
@@ -195,6 +264,13 @@ def fetch_youtube_transcript(url: str) -> str:
 
     transcript = None
     transcript_url = None
+    max_minutes = int(os.getenv("MAX_VIDEO_MINUTES", "10"))
+    duration_seconds = _get_youtube_duration_seconds(url)
+    if duration_seconds:
+        duration_minutes = duration_seconds / 60.0
+        logger.info("YouTube duration=%.2f minutes (max=%s).", duration_minutes, max_minutes)
+        if duration_minutes > max_minutes:
+            raise TranscriptError(f"Video is {duration_minutes:.1f} minutes. Max allowed is {max_minutes} minutes.")
 
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(vid)

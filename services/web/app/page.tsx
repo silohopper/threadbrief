@@ -43,6 +43,7 @@ type Brief = {
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
+const MAX_VIDEO_MINUTES = Number(process.env.NEXT_PUBLIC_MAX_VIDEO_MINUTES || "10");
 
 function lengthFromSlider(v: number): LengthType {
   return v === 0 ? "tldr" : v === 2 ? "detailed" : "brief";
@@ -132,7 +133,7 @@ export default function HomePage() {
                 placeholder="https://www.youtube.com/watch?v=..."
               />
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-                Works when subtitles/transcripts are available.
+                Works when subtitles/transcripts are available. Max {MAX_VIDEO_MINUTES} minutes.
               </Typography>
             </Box>
           ) : (

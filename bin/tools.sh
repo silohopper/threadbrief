@@ -730,6 +730,7 @@ JSON
       echo "[BUILD] WEB image"
       docker build -t "$web_repo:$TAG" \
         --build-arg NEXT_PUBLIC_API_BASE_URL="https://${api_domain}" \
+        --build-arg NEXT_PUBLIC_MAX_VIDEO_MINUTES="${MAX_VIDEO_MINUTES:-10}" \
         -f "$ROOT_DIR/services/web/Dockerfile.prod" \
         "$ROOT_DIR/services/web"
       docker push "$web_repo:$TAG"
