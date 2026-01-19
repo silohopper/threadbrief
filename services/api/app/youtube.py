@@ -114,7 +114,7 @@ def _download_youtube_audio(url: str, workdir: str) -> Path:
     return audio_path
 
 
-def _get_youtube_duration_seconds(url: str) -> int | None:
+def get_youtube_duration_seconds(url: str) -> int | None:
     """Fetch YouTube duration (seconds) via yt-dlp metadata."""
     ytdlp = _resolve_executable("yt-dlp", "YTDLP_PATH") or _resolve_executable(
         "youtube-dl",
@@ -265,7 +265,7 @@ def fetch_youtube_transcript(url: str) -> str:
     transcript = None
     transcript_url = None
     max_minutes = int(os.getenv("MAX_VIDEO_MINUTES", "10"))
-    duration_seconds = _get_youtube_duration_seconds(url)
+    duration_seconds = get_youtube_duration_seconds(url)
     if duration_seconds:
         duration_minutes = duration_seconds / 60.0
         logger.info("YouTube duration=%.2f minutes (max=%s).", duration_minutes, max_minutes)

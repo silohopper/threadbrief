@@ -43,7 +43,7 @@ type Brief = {
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
-const MAX_VIDEO_MINUTES = Number(process.env.NEXT_PUBLIC_MAX_VIDEO_MINUTES || "10");
+const UI_MAX_VIDEO_MINUTES = 25;
 
 function lengthFromSlider(v: number): LengthType {
   return v === 0 ? "tldr" : v === 2 ? "detailed" : "brief";
@@ -61,6 +61,7 @@ export default function HomePage() {
   const [mode, setMode] = React.useState<ModeType>("insights");
   const [outputLanguage, setOutputLanguage] = React.useState("en");
   const [length, setLength] = React.useState<LengthType>("brief");
+  const [videoDurationMinutes, setVideoDurationMinutes] = React.useState<number | null>(null);
 
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -70,11 +71,31 @@ export default function HomePage() {
     (tab === "youtube" && youtubeUrl.trim().length > 8) ||
     (tab === "paste" && pasteText.trim().length >= 200);
 
+  async function fetchVideoDuration(url: string) {
+    const res = await axios.get(`${API_BASE}/v1/video-meta`, {
+      params: { url },
+      timeout: 15000,
+    });
+    const minutes = Number(res.data?.duration_minutes);
+    if (Number.isFinite(minutes)) {
+      setVideoDurationMinutes(minutes);
+      return minutes;
+    }
+    return null;
+  }
+
   async function onGenerate() {
     setError(null);
     setBrief(null);
     setLoading(true);
     try {
+      if (tab === "youtube") {
+        const minutes = await fetchVideoDuration(youtubeUrl.trim());
+        if (minutes && minutes > UI_MAX_VIDEO_MINUTES) {
+          setError(`Video is ${minutes.toFixed(1)} minutes. Max shown in UI is ${UI_MAX_VIDEO_MINUTES} minutes.`);
+          return;
+        }
+      }
       const payload = {
         source_type: tab,
         source: tab === "youtube" ? youtubeUrl.trim() : (cleanFormatting ? pasteText : pasteText).trim(),
@@ -133,7 +154,8 @@ export default function HomePage() {
                 placeholder="https://www.youtube.com/watch?v=..."
               />
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-                Works when subtitles/transcripts are available. Max {MAX_VIDEO_MINUTES} minutes.
+                Works when subtitles/transcripts are available. Max {UI_MAX_VIDEO_MINUTES} minutes.
+                {videoDurationMinutes ? ` Detected: ${videoDurationMinutes.toFixed(1)} min.` : ""}
               </Typography>
             </Box>
           ) : (
