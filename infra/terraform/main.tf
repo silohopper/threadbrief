@@ -226,8 +226,8 @@ resource "aws_ecs_task_definition" "api" {
   family                   = "threadbrief-${var.env}-api"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "1024"
-  memory                   = "2048"
+  cpu                      = "512"
+  memory                   = "1024"
   execution_role_arn       = aws_iam_role.task_execution.arn
   task_role_arn            = aws_iam_role.task.arn
   container_definitions = jsonencode([
@@ -256,8 +256,8 @@ resource "aws_ecs_task_definition" "web" {
   family                   = "threadbrief-${var.env}-web"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "512"
-  memory                   = "1024"
+  cpu                      = "256"
+  memory                   = "512"
   execution_role_arn       = aws_iam_role.task_execution.arn
   task_role_arn            = aws_iam_role.task.arn
   container_definitions = jsonencode([
