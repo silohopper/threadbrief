@@ -43,7 +43,7 @@ type Brief = {
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
-const UI_MAX_VIDEO_MINUTES = 25;
+const UI_MAX_VIDEO_MINUTES = 60;
 
 function lengthFromSlider(v: number): LengthType {
   return v === 0 ? "tldr" : v === 2 ? "detailed" : "brief";
