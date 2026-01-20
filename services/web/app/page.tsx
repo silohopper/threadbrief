@@ -83,7 +83,7 @@ export default function HomePage() {
       if (typingCharIndex < currentLine.length) {
         timeout = setTimeout(() => setTypingCharIndex((count) => count + 1), 40);
       } else {
-        timeout = setTimeout(() => setTypingIsDeleting(true), 1200);
+        timeout = setTimeout(() => setTypingIsDeleting(true), 2200);
       }
     } else if (typingCharIndex > 0) {
       timeout = setTimeout(() => setTypingCharIndex((count) => count - 1), 20);

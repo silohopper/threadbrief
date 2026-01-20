@@ -31,7 +31,10 @@ logger = logging.getLogger(__name__)
 
 
 def _normalize_proxy(proxy_url: str) -> str:
-    """Normalize proxy strings to URL form expected by yt-dlp."""
+    """Normalize proxy strings to URL form expected by yt-dlp.
+
+    How it works: converts host:port:user:pass into an HTTP proxy URL and URL-escapes credentials.
+    """
     if "://" in proxy_url:
         return proxy_url
     parts = proxy_url.split(":")
@@ -44,7 +47,10 @@ def _normalize_proxy(proxy_url: str) -> str:
 
 
 def _resolve_executable(name: str, env_var: str | None = None) -> str | None:
-    """Resolve a CLI executable path with an optional env override."""
+    """Resolve a CLI executable path with an optional env override.
+
+    How it works: checks an env override first, then falls back to PATH lookup.
+    """
     if env_var:
         override = os.getenv(env_var)
         if override:
@@ -52,73 +58,11 @@ def _resolve_executable(name: str, env_var: str | None = None) -> str | None:
     return shutil.which(name)
 
 
-def _download_youtube_audio(url: str, workdir: str) -> Path:
-    """Download YouTube audio to a local file using yt-dlp/youtube-dl."""
-    logger.info("Downloading YouTube audio via yt-dlp/youtube-dl.")
-    ytdlp = _resolve_executable("yt-dlp", "YTDLP_PATH") or _resolve_executable(
-        "youtube-dl",
-        "YOUTUBEDL_PATH",
-    )
-    if not ytdlp:
-        raise TranscriptError("yt-dlp (or youtube-dl) not found. Install it to enable audio fallback.")
-
-    output_template = str(Path(workdir) / "audio.%(ext)s")
-    cmd = [
-        ytdlp,
-        "-x",
-        "--audio-format",
-        "mp3",
-        "--audio-quality",
-        "0",
-        "-o",
-        output_template,
-        url,
-    ]
-    cookies_text = os.getenv("YTDLP_COOKIES")
-    logger.info("yt-dlp cookies present=%s", bool(cookies_text))
-    if cookies_text:
-        cookies_path = Path(workdir) / "cookies.txt"
-        cookies_path.write_text(cookies_text, encoding="utf-8")
-        cmd.extend(["--cookies", str(cookies_path)])
-    proxy_url = os.getenv("YTDLP_PROXY")
-    logger.info("yt-dlp proxy present=%s", bool(proxy_url))
-    if proxy_url:
-        cmd.extend(["--proxy", _normalize_proxy(proxy_url)])
-    extra_args = os.getenv("YTDLP_ARGS", "").split()
-    if extra_args:
-        logger.info("yt-dlp extra args=%s", extra_args)
-    if extra_args:
-        cmd.extend(extra_args)
-    ytdlp_timeout = int(os.getenv("YTDLP_TIMEOUT_SECONDS", "900"))
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=ytdlp_timeout)
-    except subprocess.TimeoutExpired as exc:
-        raise TranscriptError("yt-dlp timed out while downloading audio.") from exc
-    except subprocess.CalledProcessError as exc:
-        logger.warning(
-            "yt-dlp failed (cookies_present=%s proxy_present=%s)",
-            bool(cookies_text),
-            bool(proxy_url),
-        )
-        stderr = exc.stderr.strip() if exc.stderr else ""
-        stdout = exc.stdout.strip() if exc.stdout else ""
-        logger.error("yt-dlp exit=%s stdout=%s stderr=%s", exc.returncode, stdout[:500], stderr[:500])
-        if not stderr and not stdout:
-            stderr = "Unknown yt-dlp error."
-        elif not stderr:
-            stderr = stdout
-        raise TranscriptError(f"yt-dlp failed to download audio: {stderr}") from exc
-
-    candidates = list(Path(workdir).glob("audio.*"))
-    if not candidates:
-        raise TranscriptError("yt-dlp completed but no audio file was produced.")
-    audio_path = max(candidates, key=lambda path: path.stat().st_size)
-    logger.info("Downloaded audio file: %s", audio_path.name)
-    return audio_path
-
-
 def get_ytdlp_info(url: str) -> dict | None:
-    """Fetch yt-dlp metadata for a YouTube URL."""
+    """Fetch yt-dlp metadata for a YouTube URL.
+
+    How it works: runs yt-dlp in JSON metadata mode with optional cookies/proxy.
+    """
     ytdlp = _resolve_executable("yt-dlp", "YTDLP_PATH") or _resolve_executable(
         "youtube-dl",
         "YOUTUBEDL_PATH",
@@ -153,7 +97,10 @@ def get_ytdlp_info(url: str) -> dict | None:
 
 
 def _run_ytdlp_info(cmd: list[str]) -> dict | None:
-    """Run yt-dlp metadata command and return parsed JSON."""
+    """Run yt-dlp metadata command and return parsed JSON.
+
+    How it works: executes the command with a timeout and JSON-decodes stdout.
+    """
     meta_timeout = int(os.getenv("YTDLP_META_TIMEOUT_SECONDS", "60"))
     start = time.monotonic()
     try:
@@ -173,7 +120,10 @@ def _run_ytdlp_info(cmd: list[str]) -> dict | None:
 
 
 def _extract_duration_seconds(info: dict | None) -> int | None:
-    """Extract a duration value (seconds) from yt-dlp metadata."""
+    """Extract a duration value (seconds) from yt-dlp metadata.
+
+    How it works: reads the numeric duration field if present.
+    """
     if not info:
         return None
     duration = info.get("duration")
@@ -183,12 +133,18 @@ def _extract_duration_seconds(info: dict | None) -> int | None:
 
 
 def get_youtube_duration_seconds(url: str) -> int | None:
-    """Fetch YouTube duration (seconds) via yt-dlp metadata."""
+    """Fetch YouTube duration (seconds) via yt-dlp metadata.
+
+    How it works: calls yt-dlp metadata and extracts the duration field.
+    """
     return _extract_duration_seconds(get_ytdlp_info(url))
 
 
 def _select_caption_entry(captions: dict) -> dict | None:
-    """Pick the best caption entry from a yt-dlp captions map."""
+    """Pick the best caption entry from a yt-dlp captions map.
+
+    How it works: prefers English tracks first and selects the most useful format.
+    """
     if not captions:
         return None
     lang_keys = list(captions.keys())
@@ -329,88 +285,15 @@ def _get_caption_text_from_ytdlp_info(info: dict | None) -> str | None:
     return None
 
 
-def _transcribe_audio(audio_path: Path) -> str:
-    """Transcribe an audio file using the Whisper CLI.
-
-    How it works: runs Whisper CLI with configured model/language and reads output text.
-    """
-    logger.info("Starting Whisper transcription with model=%s.", os.getenv("WHISPER_MODEL", "base"))
-    whisper = _resolve_executable("whisper", "WHISPER_PATH")
-    if not whisper:
-        raise TranscriptError("Whisper CLI not found. Install openai-whisper to enable audio transcription.")
-
-    model = os.getenv("WHISPER_MODEL", "base")
-    language = os.getenv("WHISPER_LANGUAGE", "en")
-    output_dir = audio_path.parent / "whisper_out"
-    output_dir.mkdir(exist_ok=True)
-
-    cmd = [
-        whisper,
-        str(audio_path),
-        "--model",
-        model,
-        "--output_format",
-        "txt",
-        "--output_dir",
-        str(output_dir),
-        "--task",
-        "transcribe",
-        "--fp16",
-        "False",
-    ]
-    if language:
-        cmd.extend(["--language", language])
-
-    whisper_timeout = int(os.getenv("WHISPER_TIMEOUT_SECONDS", "900"))
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=whisper_timeout)
-    except subprocess.TimeoutExpired as exc:
-        raise TranscriptError("Whisper timed out while transcribing audio.") from exc
-    except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.strip() if exc.stderr else ""
-        stdout = exc.stdout.strip() if exc.stdout else ""
-        logger.error("Whisper exit=%s stdout=%s stderr=%s", exc.returncode, stdout[:500], stderr[:500])
-        if not stderr and not stdout:
-            stderr = "Unknown Whisper error."
-        elif not stderr:
-            stderr = stdout
-        raise TranscriptError(f"Whisper transcription failed: {stderr}") from exc
-
-    transcript_path = output_dir / f"{audio_path.stem}.txt"
-    if not transcript_path.exists():
-        txt_files = list(output_dir.glob("*.txt"))
-        if not txt_files:
-            raise TranscriptError("Whisper finished but no transcript file was produced.")
-        transcript_path = txt_files[0]
-
-    text = transcript_path.read_text(encoding="utf-8").strip()
-    logger.info("Whisper transcript length=%s chars.", len(text))
-    return text
-
-
-def _transcribe_youtube_audio(url: str) -> str:
-    """Download YouTube audio and transcribe it as a fallback.
-
-    How it works: uses yt-dlp to fetch audio and then runs Whisper on the file.
-    """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        start = time.monotonic()
-        audio_path = _download_youtube_audio(url, tmpdir)
-        text = _transcribe_audio(audio_path)
-        logger.info("Audio transcription finished in %.2fs.", time.monotonic() - start)
-        return text
-
-
 def _fallback_to_audio_transcription(url: str, reason: str) -> str:
     """Try audio transcription fallback and wrap errors with context.
 
-    How it works: logs the reason, calls the audio path, and re-raises with context.
+    How it works: audio transcription is disabled for the demo, so raise immediately.
     """
-    logger.info("Falling back to audio transcription: %s", reason)
-    try:
-        return _transcribe_youtube_audio(url)
-    except TranscriptError as exc:
-        raise TranscriptError(f"{reason} Audio transcription fallback failed: {exc}") from exc
+    logger.info("Audio transcription disabled; skipping Whisper fallback: %s", reason)
+    raise TranscriptError(
+        "No subtitles/transcripts available for this video. Audio transcription is disabled for the demo."
+    )
 
 
 def fetch_youtube_transcript(url: str) -> str:
