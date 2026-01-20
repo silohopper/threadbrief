@@ -1,5 +1,12 @@
 import * as React from "react";
+import { Sora } from "next/font/google";
 import ThemeRegistry from "./theme/ThemeRegistry";
+
+const sora = Sora({
+  subsets: ["latin"],
+  display: "swap",
+  weight: ["300", "400", "500", "600", "700"],
+});
 
 export const metadata = {
   title: "ThreadBrief",
@@ -9,7 +16,7 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>
+      <body className={sora.className}>
         <ThemeRegistry>{children}</ThemeRegistry>
       </body>
     </html>

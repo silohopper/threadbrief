@@ -9,6 +9,9 @@ const theme = createTheme({
     mode: "light",
   },
   shape: { borderRadius: 12 },
+  typography: {
+    fontFamily: '"Sora", "Manrope", "Helvetica Neue", sans-serif',
+  },
 });
 
 const cache = createCache({ key: "mui", prepend: true });

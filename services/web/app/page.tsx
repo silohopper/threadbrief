@@ -44,6 +44,11 @@ type Brief = {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
 const UI_MAX_VIDEO_MINUTES = 60;
+const TYPING_LINES = [
+  "Turn long content into a clear brief.",
+  "Paste your YouTube and summarize its contents.",
+  "Get the highlights of a long social thread.",
+];
 
 function lengthFromSlider(v: number): LengthType {
   return v === 0 ? "tldr" : v === 2 ? "detailed" : "brief";
@@ -66,6 +71,35 @@ export default function HomePage() {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [brief, setBrief] = React.useState<Brief | null>(null);
+  const [typingIndex, setTypingIndex] = React.useState(0);
+  const [typingCharIndex, setTypingCharIndex] = React.useState(0);
+  const [typingIsDeleting, setTypingIsDeleting] = React.useState(false);
+
+  React.useEffect(() => {
+    const currentLine = TYPING_LINES[typingIndex];
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    if (!typingIsDeleting) {
+      if (typingCharIndex < currentLine.length) {
+        timeout = setTimeout(() => setTypingCharIndex((count) => count + 1), 40);
+      } else {
+        timeout = setTimeout(() => setTypingIsDeleting(true), 1200);
+      }
+    } else if (typingCharIndex > 0) {
+      timeout = setTimeout(() => setTypingCharIndex((count) => count - 1), 20);
+    } else {
+      setTypingIsDeleting(false);
+      setTypingIndex((index) => (index + 1) % TYPING_LINES.length);
+    }
+
+    return () => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    };
+  }, [typingCharIndex, typingIndex, typingIsDeleting]);
+
+  const typedLine = TYPING_LINES[typingIndex].slice(0, typingCharIndex);
 
   const canSubmit =
     (tab === "youtube" && youtubeUrl.trim().length > 8) ||
@@ -127,14 +161,24 @@ export default function HomePage() {
       <Header />
       <Container maxWidth="md" sx={{ py: 6 }}>
         <Box sx={{ textAlign: "center", mb: 4 }}>
-          <Typography variant="h3" fontWeight={800} gutterBottom>
-            Turn long content into a clear brief
-          </Typography>
-          <Typography variant="subtitle1" color="text.secondary">
-            YouTube videos and long social threads distilled into insights you can actually use.
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Paste a thread or drop a YouTube link. No login required.
+          <Typography variant="h3" fontWeight={800} gutterBottom sx={{ minHeight: { xs: "2.6em", sm: "2.2em" } }}>
+            {typedLine}
+            <Box
+              component="span"
+              sx={{
+                display: "inline-block",
+                ml: 0.5,
+                width: "0.7ch",
+                animation: "blink 1s steps(1) infinite",
+                "@keyframes blink": {
+                  "0%": { opacity: 1 },
+                  "50%": { opacity: 0 },
+                  "100%": { opacity: 1 },
+                },
+              }}
+            >
+              |
+            </Box>
           </Typography>
         </Box>
 
