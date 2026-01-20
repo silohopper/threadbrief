@@ -2,7 +2,7 @@
 
 This document tracks the phased development plan for ThreadBrief.
 
-The project is intentionally shipped in **Phase 0 (Demo MVP)** first.
+The project is intentionally shipped in **1 (Demo MVP)** first.
 All later phases are optional, incremental, and can be completed over time.
 
 Primary goals:
@@ -12,7 +12,7 @@ Primary goals:
 
 ---
 
-## ✅ Phase 0 — Demo MVP (SHIPPED / IN PROGRESS)
+## ✅ Phase 1 — Demo MVP (SHIPPED / IN PROGRESS)
 
 **Status:** ✅ Primary focus  
 **Purpose:** End-to-end working demo (frontend, backend, infra shape)
@@ -126,6 +126,6 @@ Primary goals:
 
 ## Philosophy
 
-- Phase 0 is intentionally **complete and shippable**
+- Phase 1 is intentionally **complete and shippable**
 - Later phases are **modular upgrades**
 - Repo should always build, run, and demo cleanly

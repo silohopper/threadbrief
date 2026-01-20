@@ -2,7 +2,7 @@
 
 - Web (Next.js + MUI) calls API (FastAPI) at `/v1/briefs`.
 - API generates structured brief using Gemini (or mock if no API key).
-- Brief stored in memory (Phase 0). Later: DynamoDB + user accounts.
+- Brief stored in memory (Phase 1). Later: DynamoDB + user accounts.
 - Share page is `/b/{id}` and fetches the brief from API.
 
 ## Lambda readiness (optional)

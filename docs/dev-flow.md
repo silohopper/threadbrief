@@ -1,6 +1,6 @@
 # Dev flow (local)
 
-This is the "do this every time" guide for ThreadBrief Phase 0.
+This is the "do this every time" guide for ThreadBrief Phase 1.
 
 ## Prereqs
 - Docker Desktop (running)
@@ -56,7 +56,7 @@ sh bin/tools.sh dev down
 - Check CORS in `env/dev/.env` (CORS_ORIGINS should include http://localhost:3000)
 
 ### "Daily limit reached"
-- Demo rate limit is 2/day/IP (Phase 0). Change in `env/dev/.env`:
+- Demo rate limit is 2/day/IP (Phase 1). Change in `env/dev/.env`:
   - `RATE_LIMIT_PER_DAY=999` for dev if you want.
 
 ### YouTube transcript errors
@@ -68,4 +68,4 @@ sh bin/tools.sh dev down
 
 ## Notes
 - Phase 0 stores briefs in memory. Restarting containers clears saved briefs.
-- Login/My Briefs comes in Phase 1.
+- Login/My Briefs comes in Phase 2.

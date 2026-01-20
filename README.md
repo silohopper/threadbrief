@@ -37,12 +37,12 @@ The UI is designed with MUI components and a centered layout that scales down cl
 
 ## Roadmap (phase order)
 
-1. ✅ Phase 0 — Demo MVP (ship)
-2. 🧠 Phase 1.5 — Smarter Distillation
-3. 🔐 Phase 1 — Login + My Briefs
-4. 🖼 Phase 2 — Visual Slides
-5. 🔁 Phase 2.5 — Flow Diagrams
-6. 🎧 Phase 3 — Voice Narration
+1. ✅ Phase 1 — Demo MVP (ship)
+2. 🧠 Phase 2 — Smarter Distillation
+3. 🔐 Phase 3 — Login + My Briefs
+4. 🖼 Phase 4 — Visual Slides
+5. 🔁 Phase 5 — Flow Diagrams
+6. 🎧 Phase 6 — Voice Narration
 
 ---
 
@@ -148,29 +148,23 @@ That guide includes a suggested IAM policy if you want tighter permissions than
 
 ## API (Phase 0)
 
-### Optional: YouTube audio fallback (local Whisper)
-YouTube transcripts use YouTube captions first. If none exist, the API falls back
-to downloading audio with `yt-dlp` and transcribing locally with the Whisper CLI.
+### YouTube captions-only (demo mode)
+The API only uses YouTube transcripts/captions. If none are available, it returns
+a clear error asking the user to try another video or paste text instead.
 
 Environment variables (optional):
-- `WHISPER_PATH` (override path to `whisper` binary)
-- `WHISPER_MODEL` (default: `base`)
-- `WHISPER_LANGUAGE` (default: `en`)
 - `YTDLP_PATH` / `YOUTUBEDL_PATH` (override downloader path)
 - `YTDLP_ARGS` (extra yt-dlp args, e.g. `--js-runtimes node`)
 - `YTDLP_COOKIES` (cookies.txt contents for YouTube bot checks)
 - `YTDLP_PROXY` (optional proxy URL or host:port:user:pass)
 
 ### Timeouts
-The YouTube fallback can take a while (yt-dlp + Whisper). These are the current
-timeouts and where to change them:
+YouTube caption fetching can still take time. These are the current timeouts and
+where to change them:
 - Frontend request timeout: `services/web/app/page.tsx` (currently 180s)
-- API yt-dlp timeout: `YTDLP_TIMEOUT_SECONDS` (default 300s)
-- API Whisper timeout: `WHISPER_TIMEOUT_SECONDS` (default 300s)
+- API yt-dlp metadata timeout: `YTDLP_META_TIMEOUT_SECONDS` (default 60s)
+- API yt-dlp caption timeout: `YTDLP_CAPTION_TIMEOUT_SECONDS` (default 30s)
 - ALB idle timeout: `infra/terraform/main.tf` (`idle_timeout = 300`)
-
-Note: the Whisper dependency is intentionally excluded from CI installs. It is
-installed in Docker via `services/api/requirements-whisper.txt`.
 
 Local dev cookies:
 - Create `env/dev/cookies.txt` (do not commit; gitignored).

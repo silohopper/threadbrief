@@ -223,6 +223,10 @@ fixes this. If you have a proxy URL:
 The deploy script will read `env/<env>/proxy.txt` (or `env/dev/proxy.txt`) and
 store it as a `YTDLP_PROXY` secret for the API task. Do **not** commit this file.
 
+### Captions-only mode
+The demo API does not run Whisper. Videos must have transcripts/captions available
+via YouTube/yt-dlp or the request will return an error.
+
 ## Step 10) Test
 - Web: https://staging.threadbrief.com
 - API health: https://api.staging.threadbrief.com/health
