@@ -118,6 +118,7 @@ COMMANDS (stage/prod)
   tail              tail terraform logs for the last up/down action
   zoneid            show Route53 hosted zone IDs for domain_name
   api-test [url]    POST /v1/briefs and print response/timings
+  youtube-test      POST 3 fixed YouTube URLs; prints title/overview; fails on non-200
   resync            import existing AWS resources into state
   unlock <lock_id>  force-unlock Terraform state
   logs <svc>        tail CloudWatch logs (api|web)
@@ -470,6 +471,68 @@ JSON
         --max-time 930 \
         --connect-timeout 10 \
         -d "$payload"
+      exit 0
+      ;;
+
+    youtube-test)
+      # Run a fixed YouTube test suite against production (or stage).
+      api_domain="$(awk -F'=' '/^api_domain/ {gsub(/[[:space:]\"]/, "", $2); print $2; exit}' "$ROOT_DIR/infra/terraform/envs/$ENV.tfvars")"
+      if [ -z "$api_domain" ]; then
+        api_domain="api.threadbrief.com"
+      fi
+      api_base="https://${api_domain}"
+
+      run_youtube_test() {
+        local url="$1"
+        local label="$2"
+        local payload
+        payload=$(cat <<JSON
+{
+  "source_type": "youtube",
+  "source": "${url}",
+  "mode": "insights",
+  "length": "brief",
+  "output_language": "en"
+}
+JSON
+)
+        echo "[${ENV}] Testing ${label}..."
+        response="$(curl -sS -w "\nHTTP_STATUS:%{http_code}\n" \
+          -X POST "${api_base}/v1/briefs" \
+          -H "Content-Type: application/json" \
+          --max-time 930 \
+          --connect-timeout 10 \
+          -d "$payload")"
+        status="$(printf "%s" "$response" | sed -n 's/^HTTP_STATUS://p' | tail -n 1)"
+        body="$(printf "%s" "$response" | sed '/^HTTP_STATUS:/d')"
+        if [ "$status" != "200" ]; then
+          echo "[${ENV}] FAIL ${label}: HTTP ${status}"
+          echo "$body"
+          return 1
+        fi
+        if ! printf "%s" "$body" | grep -q '"id"'; then
+          echo "[${ENV}] FAIL ${label}: missing id in response"
+          echo "$body"
+          return 1
+        fi
+        summary="$(printf "%s" "$body" | python3 -c 'import json,sys
+try:
+    data = json.load(sys.stdin)
+except json.JSONDecodeError:
+    print("Unparseable JSON response.")
+    sys.exit(0)
+title = data.get("title") or ""
+overview = data.get("overview") or ""
+print(f"Title: {title}")
+print(f"Overview: {overview}")
+')"
+        echo "[${ENV}] PASS ${label}"
+        echo "$summary"
+      }
+
+      run_youtube_test "https://www.youtube.com/watch?v=fR-PReWhMGM" "MLK (1 min)" || exit 1
+      run_youtube_test "https://www.youtube.com/watch?v=dQw4w9WgXcQ" "Rick Astley (3:30)" || exit 1
+      run_youtube_test "https://www.youtube.com/watch?v=s6apjpQbBNg" "Yourfriend Sommi (11:18)" || exit 1
       exit 0
       ;;
 
