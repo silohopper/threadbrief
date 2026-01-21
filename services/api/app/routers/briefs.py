@@ -9,7 +9,7 @@ from app.models import CreateBriefRequest, BriefMeta, Brief
 from app.settings import settings
 from app.storage import memory_store
 from app.utils import is_probably_youtube_url, clean_pasted_text
-from app.youtube import fetch_youtube_transcript, get_youtube_duration_seconds, TranscriptError
+from app.youtube import fetch_youtube_transcript, get_ytdlp_info, TranscriptError
 from app.llm import build_prompt, generate_brief_gemini, mock_brief
 from app.parse import parse_llm_text
 
@@ -98,15 +98,21 @@ async def create_brief(payload: CreateBriefRequest, request: Request):
 
 @router.get("/video-meta")
 def get_video_meta(url: str):
-    """Return basic metadata for a YouTube URL (duration)."""
+    """Return basic metadata for a YouTube URL (duration/title)."""
     if not is_probably_youtube_url(url):
         raise HTTPException(status_code=400, detail="Please enter a valid YouTube URL.")
-    duration_seconds = get_youtube_duration_seconds(url)
-    if not duration_seconds:
-        raise HTTPException(status_code=400, detail="Could not fetch video duration.")
+    info = get_ytdlp_info(url)
+    duration_seconds = None
+    title = None
+    if info:
+        title = info.get("title")
+        duration = info.get("duration")
+        if isinstance(duration, (int, float)):
+            duration_seconds = int(duration)
     return {
         "duration_seconds": duration_seconds,
-        "duration_minutes": round(duration_seconds / 60, 2),
+        "duration_minutes": round(duration_seconds / 60, 2) if duration_seconds else None,
+        "title": title,
     }
 
 

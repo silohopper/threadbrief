@@ -108,7 +108,7 @@ export default function HomePage() {
   async function fetchVideoDuration(url: string) {
     const res = await axios.get(`${API_BASE}/v1/video-meta`, {
       params: { url },
-      timeout: 15000,
+      timeout: 120000,
     });
     const minutes = Number(res.data?.duration_minutes);
     if (Number.isFinite(minutes)) {
