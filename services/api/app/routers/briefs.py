@@ -1,6 +1,7 @@
 """Brief creation and retrieval HTTP endpoints."""
 
 from fastapi import APIRouter, HTTPException, Request
+import httpx
 import logging
 from datetime import datetime, timezone
 from nanoid import generate
@@ -80,7 +81,21 @@ async def create_brief(payload: CreateBriefRequest, request: Request):
 
     # Generate text (Gemini or mock)
     if settings.gemini_api_key:
-        llm_text = await generate_brief_gemini(settings.gemini_api_key, prompt)
+        try:
+            llm_text = await generate_brief_gemini(settings.gemini_api_key, prompt)
+        except httpx.HTTPStatusError as exc:
+            status = getattr(exc.response, "status_code", None) or 502
+            if status == 429:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Gemini rate limit reached. Please wait a minute and try again.",
+                ) from exc
+            detail = f"Gemini request failed (status {status})."
+            if exc.response is not None:
+                text = (exc.response.text or "").strip()
+                if text:
+                    detail = f"{detail} {text[:200]}"
+            raise HTTPException(status_code=status, detail=detail) from exc
     else:
         llm_text = mock_brief(prompt)
 

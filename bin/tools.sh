@@ -530,9 +530,14 @@ print(f"Overview: {overview}")
         echo "$summary"
       }
 
-      run_youtube_test "https://www.youtube.com/watch?v=fR-PReWhMGM" "MLK (1 min)" || exit 1
-      run_youtube_test "https://www.youtube.com/watch?v=dQw4w9WgXcQ" "Rick Astley (3:30)" || exit 1
-      run_youtube_test "https://www.youtube.com/watch?v=s6apjpQbBNg" "Yourfriend Sommi (11:18)" || exit 1
+      failures=0
+      run_youtube_test "https://www.youtube.com/watch?v=fR-PReWhMGM" "MLK (1 min)" || failures=$((failures + 1))
+      run_youtube_test "https://www.youtube.com/watch?v=dQw4w9WgXcQ" "Rick Astley (3:30)" || failures=$((failures + 1))
+      run_youtube_test "https://www.youtube.com/watch?v=s6apjpQbBNg" "Yourfriend Sommi (11:18)" || failures=$((failures + 1))
+      run_youtube_test "https://www.youtube.com/watch?v=lmk0NDydEEM" "Yourfriend Sommi (20:44)" || failures=$((failures + 1))
+      if [ "$failures" -gt 0 ]; then
+        exit 1
+      fi
       exit 0
       ;;
 
