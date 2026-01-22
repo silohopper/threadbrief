@@ -15,11 +15,11 @@ export default function AboutPage() {
           </Typography>
 
           <Typography variant="h6" fontWeight={800} sx={{ mt: 3, mb: 1 }}>
-            Phase 0 limitations
+            Phase 1 limitations
           </Typography>
           <Typography variant="body1" color="text.secondary">
-            YouTube transcripts are best-effort. If a transcript is not available, use Paste mode.
-            Twitter/LinkedIn auto-fetch is intentionally not in v1.
+            Some YouTube videos don’t have captions, so those won’t work here yet. In that case, use Paste mode.
+            For now, paste text from Twitter or LinkedIn instead of a link.
           </Typography>
         </Card>
       </Container>
