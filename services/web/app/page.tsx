@@ -276,7 +276,7 @@ export default function HomePage() {
           </Button>
 
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", textAlign: "center", mt: 1.5 }}>
-            Demo is rate-limited (2 briefs per day).
+            Demo is rate-limited (100 briefs per day).
           </Typography>
         </Card>
 

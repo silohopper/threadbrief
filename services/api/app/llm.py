@@ -74,12 +74,15 @@ async def generate_brief_gemini(api_key: str, prompt: str) -> str:
     Raises:
         httpx.HTTPError: If the Gemini request fails.
     """
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key,
+    }
     payload = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.4, "maxOutputTokens": 900},
     }
-    url = f"{GEMINI_ENDPOINT}?key={api_key}"
+    url = GEMINI_ENDPOINT
     max_retries = int(os.getenv("GEMINI_MAX_RETRIES", "3"))
     backoff = float(os.getenv("GEMINI_RETRY_BACKOFF", "1.0"))
 

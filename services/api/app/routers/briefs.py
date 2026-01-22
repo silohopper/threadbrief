@@ -112,10 +112,15 @@ async def create_brief(payload: CreateBriefRequest, request: Request):
 
 
 @router.get("/video-meta")
-def get_video_meta(url: str):
+def get_video_meta(url: str, request: Request):
     """Return basic metadata for a YouTube URL (duration/title)."""
     if not is_probably_youtube_url(url):
         raise HTTPException(status_code=400, detail="Please enter a valid YouTube URL.")
+    ip = client_ip(request)
+    dk = f"video-meta:{day_key_utc()}"
+    current = memory_store.get_rate(ip, dk)
+    if current >= settings.rate_limit_per_day:
+        raise HTTPException(status_code=429, detail=f"Daily limit reached ({settings.rate_limit_per_day}/day).")
     info = get_ytdlp_info(url)
     duration_seconds = None
     title = None
@@ -124,6 +129,7 @@ def get_video_meta(url: str):
         duration = info.get("duration")
         if isinstance(duration, (int, float)):
             duration_seconds = int(duration)
+    memory_store.bump_rate(ip, dk)
     return {
         "duration_seconds": duration_seconds,
         "duration_minutes": round(duration_seconds / 60, 2) if duration_seconds else None,
