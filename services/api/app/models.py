@@ -22,6 +22,7 @@ class BriefMeta(BaseModel):
     """Metadata associated with a generated brief."""
 
     source_type: SourceType
+    source_url: str | None = None
     mode: ModeType
     length: LengthType
     output_language: str

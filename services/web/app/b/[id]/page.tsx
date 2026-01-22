@@ -13,6 +13,7 @@ type Brief = {
   why_it_matters?: string | null;
   meta: {
     source_type: string;
+    source_url?: string | null;
     mode: string;
     length: string;
     output_language: string;
@@ -47,11 +48,24 @@ export default function BriefPage({ params }: { params: { id: string } }) {
             <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
               <Box sx={{ flex: 1, minWidth: 260 }}>
                 <Typography variant="h4" fontWeight={900} gutterBottom>
-                  {brief.title}
+                  {brief.meta.source_type === "youtube" && brief.meta.source_url ? (
+                    <a href={brief.meta.source_url} target="_blank" rel="noreferrer">
+                      {brief.title}
+                    </a>
+                  ) : (
+                    brief.title
+                  )}
                 </Typography>
                 <Typography variant="body1" color="text.secondary">
                   {brief.overview}
                 </Typography>
+                {brief.meta.source_type === "youtube" && brief.meta.source_url && (
+                  <Typography variant="body2" sx={{ mt: 1 }}>
+                    <a href={brief.meta.source_url} target="_blank" rel="noreferrer">
+                      View on YouTube
+                    </a>
+                  </Typography>
+                )}
               </Box>
 
               <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", alignSelf: "flex-start" }}>
@@ -99,7 +113,13 @@ export default function BriefPage({ params }: { params: { id: string } }) {
                   navigator.clipboard.writeText(
                     `${brief.title}
 
-${brief.overview}
+${brief.overview}${
+                      brief.meta.source_type === "youtube" && brief.meta.source_url
+                        ? `
+
+YouTube: ${brief.meta.source_url}`
+                        : ""
+                    }
 
 ${brief.bullets.map((x) => `- ${x}`).join("\n")}${
                       brief.why_it_matters ? `

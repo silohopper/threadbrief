@@ -72,6 +72,7 @@ async def create_brief(payload: CreateBriefRequest, request: Request):
 
     meta = BriefMeta(
         source_type=payload.source_type,
+        source_url=payload.source if payload.source_type == "youtube" else None,
         mode=payload.mode,
         length=payload.length,
         output_language=payload.output_language,

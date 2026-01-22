@@ -36,6 +36,7 @@ type Brief = {
   why_it_matters?: string | null;
   meta: {
     source_type: SourceType;
+    source_url?: string | null;
     mode: ModeType;
     length: LengthType;
     output_language: string;
@@ -291,11 +292,27 @@ export default function HomePage() {
             <Box sx={{ display: "flex", alignItems: "flex-start", gap: 2, mb: 2, flexWrap: "wrap" }}>
               <Box sx={{ flex: 1, minWidth: 240 }}>
                 <Typography variant="h5" fontWeight={800}>
-                  {brief.title} <Typography component="span" color="text.secondary" fontWeight={500}>(Brief)</Typography>
+                  {brief.meta.source_type === "youtube" && brief.meta.source_url ? (
+                    <a href={brief.meta.source_url} target="_blank" rel="noreferrer">
+                      {brief.title}
+                    </a>
+                  ) : (
+                    brief.title
+                  )}{" "}
+                  <Typography component="span" color="text.secondary" fontWeight={500}>
+                    (Brief)
+                  </Typography>
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                   {brief.overview}
                 </Typography>
+                {brief.meta.source_type === "youtube" && brief.meta.source_url && (
+                  <Typography variant="body2" sx={{ mt: 1 }}>
+                    <a href={brief.meta.source_url} target="_blank" rel="noreferrer">
+                      View on YouTube
+                    </a>
+                  </Typography>
+                )}
               </Box>
 
               <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
@@ -326,13 +343,19 @@ export default function HomePage() {
               >
                 Copy link
               </Button>
-              <Button
-                variant="outlined"
-                onClick={() =>
-                  navigator.clipboard.writeText(
-                    `${brief.title}
+                <Button
+                  variant="outlined"
+                  onClick={() =>
+                    navigator.clipboard.writeText(
+                      `${brief.title}
 
-${brief.overview}
+${brief.overview}${
+                      brief.meta.source_type === "youtube" && brief.meta.source_url
+                        ? `
+
+YouTube: ${brief.meta.source_url}`
+                        : ""
+                    }
 
 ${brief.bullets.map((x) => `- ${x}`).join("\n")}${
                       brief.why_it_matters ? `
@@ -340,9 +363,9 @@ ${brief.bullets.map((x) => `- ${x}`).join("\n")}${
 Why it matters:
 ${brief.why_it_matters}` : ""
                     }`
-                  )
-                }
-              >
+                    )
+                  }
+                >
                 Copy text
               </Button>
             </Box>
