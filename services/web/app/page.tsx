@@ -43,7 +43,7 @@ type Brief = {
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
-const UI_MAX_VIDEO_MINUTES = 60;
+const UI_MAX_VIDEO_MINUTES = 180;
 const TYPING_LINES = [
   "Turn long content into a clear brief.",
   "Paste your YouTube and summarize its contents.",
