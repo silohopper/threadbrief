@@ -124,6 +124,14 @@ sh bin/tools.sh dev up
 
 ---
 
+## Google Analytics (optional)
+Set `NEXT_PUBLIC_GA_ID` (GA4 measurement ID like `G-XXXXXXXXXX`) to enable tracking.
+
+- Dev: export `NEXT_PUBLIC_GA_ID` before `sh bin/tools.sh dev up`
+- Prod: export `NEXT_PUBLIC_GA_ID` before `sh bin/tools.sh prod deploy` so the web build embeds it
+
+---
+
 ## Useful commands
 
 ```bash

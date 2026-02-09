@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Sora } from "next/font/google";
+import { GoogleAnalytics } from "@next/third-parties/google";
 import ThemeRegistry from "./theme/ThemeRegistry";
 
 const sora = Sora({
@@ -14,11 +15,13 @@ export const metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const gaId = process.env.NEXT_PUBLIC_GA_ID;
   return (
     <html lang="en">
       <body className={sora.className}>
         <ThemeRegistry>{children}</ThemeRegistry>
       </body>
+      {gaId ? <GoogleAnalytics gaId={gaId} /> : null}
     </html>
   );
 }
