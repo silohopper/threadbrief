@@ -750,6 +750,14 @@ print(f"Overview: {overview}")
         VARS_ARGS+=(-var "ytdlp_proxy=$TF_VAR_ytdlp_proxy")
       fi
 
+      GA_FILE="$ROOT_DIR/env/$ENV/ga_id.txt"
+      if [ ! -f "$GA_FILE" ]; then
+        GA_FILE="$ROOT_DIR/env/dev/ga_id.txt"
+      fi
+      if [ -f "$GA_FILE" ]; then
+        export NEXT_PUBLIC_GA_ID="$(tr -d '\n' < "$GA_FILE")"
+      fi
+
       # Import any existing secrets into state so apply doesn't fail on duplicates.
       # This is the exact same concept as Route53 zones: "if it exists, import it first"
       for secret_name in \
@@ -799,6 +807,7 @@ print(f"Overview: {overview}")
       docker build -t "$web_repo:$TAG" \
         --build-arg NEXT_PUBLIC_API_BASE_URL="https://${api_domain}" \
         --build-arg NEXT_PUBLIC_MAX_VIDEO_MINUTES="${MAX_VIDEO_MINUTES:-10}" \
+        --build-arg NEXT_PUBLIC_GA_ID="${NEXT_PUBLIC_GA_ID:-}" \
         -f "$ROOT_DIR/services/web/Dockerfile.prod" \
         "$ROOT_DIR/services/web"
       docker push "$web_repo:$TAG"

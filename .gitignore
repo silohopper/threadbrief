@@ -8,6 +8,9 @@ env/prod/cookies.txt
 env/dev/proxy.txt
 env/stage/proxy.txt
 env/prod/proxy.txt
+env/dev/ga_id.txt
+env/stage/ga_id.txt
+env/prod/ga_id.txt
 __pycache__
 *.pyc
 dist
