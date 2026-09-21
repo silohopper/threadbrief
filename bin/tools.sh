@@ -109,20 +109,19 @@ COMMANDS (dev)
   build             build web + api images
 
 COMMANDS (stage/prod)
-  up                terraform apply (creates/updates infra)
+  up                terraform apply (creates/updates infra: S3/CloudFront/Lambda/DynamoDB)
   down              terraform destroy (tears down infra)
-  deploy            build/push images to ECR + restart ECS services
+  deploy            terraform apply + push Lambda image + sync static web export
   destroy           alias of down
   plan              terraform plan with correct var-file
   status            show terraform state/lock status
   tail              tail terraform logs for the last up/down action
   zoneid            show Route53 hosted zone IDs for domain_name
-  api-test [url]    POST /v1/briefs and print response/timings
+  api-test [url]    POST /v1/briefs (via the Lambda Function URL) and print response/timings
   youtube-test      POST 3 fixed YouTube URLs; prints title/overview; fails on non-200
   resync            import existing AWS resources into state
   unlock <lock_id>  force-unlock Terraform state
-  logs <svc>        tail CloudWatch logs (api|web)
-  elb               show ELB + target health info
+  logs              tail the API Lambda's CloudWatch logs
 
 EXAMPLES
   sh bin/tools.sh dev up
@@ -137,8 +136,7 @@ EXAMPLES
   sh bin/tools.sh stage tail
   sh bin/tools.sh stage resync
   sh bin/tools.sh stage unlock <lock_id>
-  sh bin/tools.sh stage logs api
-  sh bin/tools.sh stage elb
+  sh bin/tools.sh stage logs
 EOF
 }
 
@@ -279,62 +277,8 @@ tf_resync_state() {
   fi
   # ---------------------------------------------------------------------------
 
-  # Find default VPC ID (this script assumes you're using the default VPC)
-  vpc_id="$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text 2>/dev/null || true)"
-
-  # If we have a VPC, look for the ALB security group we expect by name:
-  # "threadbrief-<env>-alb"
-  if [ -n "$vpc_id" ] && [ "$vpc_id" != "None" ]; then
-    sg_id="$(aws ec2 describe-security-groups --filters Name=group-name,Values="threadbrief-$env-alb" Name=vpc-id,Values="$vpc_id" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)"
-    if [ -n "$sg_id" ] && [ "$sg_id" != "None" ]; then
-      try_import aws_security_group.alb "$sg_id"
-    fi
-  fi
-
-  # CloudWatch log groups (ECS tasks write logs to these)
-  # We import them if they exist to prevent Terraform trying to recreate.
-  for log_group in "/ecs/threadbrief/$env/api" "/ecs/threadbrief/$env/web"; do
-    lg_name="$(aws logs describe-log-groups --log-group-name-prefix "$log_group" --query "logGroups[?logGroupName=='$log_group']|[0].logGroupName" --output text 2>/dev/null || true)"
-    if [ -n "$lg_name" ] && [ "$lg_name" != "None" ]; then
-      if [ "$log_group" = "/ecs/threadbrief/$env/api" ]; then
-        try_import aws_cloudwatch_log_group.api "$log_group"
-      else
-        try_import aws_cloudwatch_log_group.web "$log_group"
-      fi
-    fi
-  done
-
-  # ALB import (load balancer)
-  lb_arn="$(aws elbv2 describe-load-balancers --names "threadbrief-$env" --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || true)"
-  if [ -n "$lb_arn" ] && [ "$lb_arn" != "None" ]; then
-    try_import aws_lb.this "$lb_arn"
-  fi
-
-  # Target groups import (ALB forwards to these)
-  api_tg_arn="$(aws elbv2 describe-target-groups --names "threadbrief-$env-api" --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || true)"
-  if [ -n "$api_tg_arn" ] && [ "$api_tg_arn" != "None" ]; then
-    try_import aws_lb_target_group.api "$api_tg_arn"
-  fi
-
-  web_tg_arn="$(aws elbv2 describe-target-groups --names "threadbrief-$env-web" --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || true)"
-  if [ -n "$web_tg_arn" ] && [ "$web_tg_arn" != "None" ]; then
-    try_import aws_lb_target_group.web "$web_tg_arn"
-  fi
-
-  # ECR repos (where Docker images live)
+  # ECR repo (holds the API's Lambda container image)
   try_import aws_ecr_repository.api "threadbrief-$env-api"
-  try_import aws_ecr_repository.web "threadbrief-$env-web"
-
-  # IAM roles (ECS task role and execution role)
-  try_import aws_iam_role.task "threadbrief-$env-task"
-  try_import aws_iam_role.task_execution "threadbrief-$env-task-exec"
-
-  # ECS service-linked role (AWS-managed role ECS needs)
-  slr_account_id="$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)"
-  if [ -n "$slr_account_id" ] && [ "$slr_account_id" != "None" ]; then
-    slr_arn="arn:aws:iam::${slr_account_id}:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS"
-    try_import aws_iam_service_linked_role.ecs "$slr_arn"
-  fi
 }
 
 # -----------------------------------------------------------------------------
@@ -375,17 +319,6 @@ if [ "$ENV" != "dev" ]; then
         vars_args+=(-var "route53_zone_id=$ROUTE53_ZONE_ID")
       fi
 
-      # Prod gets special handling:
-      #   - import existing resources into Terraform state before apply
-      if [ "$ENV" = "prod" ]; then
-        echo "[$ENV] Importing existing resources into state..."
-        tf_resync_state "$ENV" "$ROOT_DIR/infra/terraform"
-      else
-        # For stage, import the ECS service linked role (some accounts already have it)
-        slr_arn="arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS"
-        terraform -chdir="$ROOT_DIR/infra/terraform" import -var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars" aws_iam_service_linked_role.ecs "$slr_arn" >/dev/null 2>&1 || true
-      fi
-
       # Optional manual resync (RESYNC=1 sh bin/tools.sh prod up)
       if [ "${RESYNC:-}" = "1" ]; then
         echo "[$ENV] Resyncing existing resources into state..."
@@ -413,23 +346,6 @@ if [ "$ENV" != "dev" ]; then
       exit 0
       ;;
 
-    cert)
-      # For ACM certificates, you often need validation records.
-      # This prints out the CNAME validation records Terraform expects.
-      tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
-      vars_args=(-var-file="$ROOT_DIR/infra/terraform/envs/$ENV.tfvars")
-      if [ -n "${ROUTE53_ZONE_ID:-}" ]; then
-        vars_args+=(-var "route53_zone_id=$ROUTE53_ZONE_ID")
-      fi
-      if ! terraform -chdir="$ROOT_DIR/infra/terraform" output acm_validation_records >/dev/null 2>&1; then
-        terraform -chdir="$ROOT_DIR/infra/terraform" apply \
-          "${vars_args[@]}" \
-          -target=aws_acm_certificate.this
-      fi
-      terraform -chdir="$ROOT_DIR/infra/terraform" output acm_validation_records
-      exit 0
-      ;;
-
     zoneid)
       # Show Route53 hosted zone IDs for the domain in envs/<ENV>.tfvars.
       domain_name="$(awk -F'=' '/^domain_name/ {gsub(/[[:space:]\"]/, "", $2); print $2; exit}' "$ROOT_DIR/infra/terraform/envs/$ENV.tfvars")"
@@ -446,11 +362,9 @@ if [ "$ENV" != "dev" ]; then
 
     api-test)
       # POST a brief request and print response + timings.
-      api_domain="$(awk -F'=' '/^api_domain/ {gsub(/[[:space:]\"]/, "", $2); print $2; exit}' "$ROOT_DIR/infra/terraform/envs/$ENV.tfvars")"
-      if [ -z "$api_domain" ]; then
-        api_domain="api.threadbrief.com"
-      fi
-      api_base="https://${api_domain}"
+      tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
+      api_base="$(terraform -chdir="$ROOT_DIR/infra/terraform" output -raw lambda_function_url)"
+      api_base="${api_base%/}"
       source_url="${ARG:-https://www.youtube.com/watch?v=dQw4w9WgXcQ}"
       length="${LENGTH:-brief}"
       mode="${MODE:-insights}"
@@ -476,11 +390,9 @@ JSON
 
     youtube-test)
       # Run a fixed YouTube test suite against production (or stage).
-      api_domain="$(awk -F'=' '/^api_domain/ {gsub(/[[:space:]\"]/, "", $2); print $2; exit}' "$ROOT_DIR/infra/terraform/envs/$ENV.tfvars")"
-      if [ -z "$api_domain" ]; then
-        api_domain="api.threadbrief.com"
-      fi
-      api_base="https://${api_domain}"
+      tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
+      api_base="$(terraform -chdir="$ROOT_DIR/infra/terraform" output -raw lambda_function_url)"
+      api_base="${api_base%/}"
 
       run_youtube_test() {
         local url="$1"
@@ -556,27 +468,6 @@ print(f"Overview: {overview}")
         # Handle both old and count-based addresses.
         terraform -chdir="$ROOT_DIR/infra/terraform" state rm 'aws_route53_zone.this' >/dev/null 2>&1 || true
         terraform -chdir="$ROOT_DIR/infra/terraform" state rm 'aws_route53_zone.this[0]' >/dev/null 2>&1 || true
-      fi
-
-      # Some accounts block destroy if ECR repos contain images or have settings.
-      # Targeted apply can break when resource addresses shift, so keep it prod-only.
-      if [ "$ENV" = "prod" ]; then
-        ecr_targets=()
-        if aws ecr describe-repositories --region "$AWS_REGION" --repository-names "threadbrief-$ENV-api" >/dev/null 2>&1; then
-          ecr_targets+=(-target=aws_ecr_repository.api)
-        fi
-        if aws ecr describe-repositories --region "$AWS_REGION" --repository-names "threadbrief-$ENV-web" >/dev/null 2>&1; then
-          ecr_targets+=(-target=aws_ecr_repository.web)
-        fi
-        if [ "${#ecr_targets[@]}" -gt 0 ]; then
-          terraform -chdir="$ROOT_DIR/infra/terraform" apply "${vars_args[@]}" "${ecr_targets[@]}" -auto-approve
-        fi
-      fi
-
-      # Stage uses an imported ECS service-linked role sometimes; remove it from state
-      # so destroy doesn't try to delete the AWS-managed role (often not allowed).
-      if [ "$ENV" != "prod" ]; then
-        terraform -chdir="$ROOT_DIR/infra/terraform" state rm aws_iam_service_linked_role.ecs >/dev/null 2>&1 || true
       fi
 
       log_path="$(tf_log_path "$ENV" "down" "$ROOT_DIR/infra/terraform")"
@@ -656,49 +547,21 @@ print(f"Overview: {overview}")
       ;;
 
     logs)
-      # CloudWatch logs tail (ECS task logs)
-      if [ -z "${ARG:-}" ]; then
-        echo "Missing service for logs (api|web)."
-        exit 1
-      fi
-      if [ "$ARG" != "api" ] && [ "$ARG" != "web" ]; then
-        echo "Unknown service for logs: $ARG (expected api|web)."
-        exit 1
-      fi
-      aws logs tail "/ecs/threadbrief/$ENV/$ARG" --since 10m
-      exit 0
-      ;;
-
-    elb)
-      # Debug ALB + listeners + target health
-      lb_name="threadbrief-$ENV"
-      lb_arn="$(aws elbv2 describe-load-balancers --names "$lb_name" --query "LoadBalancers[0].LoadBalancerArn" --output text)"
-      echo "Load balancer: $lb_name"
-      echo "ARN: $lb_arn"
-      aws elbv2 describe-load-balancer-attributes \
-        --load-balancer-arn "$lb_arn" \
-        --query "Attributes[?Key=='idle_timeout.timeout_seconds']"
-      aws elbv2 describe-listeners --load-balancer-arn "$lb_arn" \
-        --query "Listeners[].{Port:Port,Protocol:Protocol,Default:DefaultActions[0].Type}"
-      api_tg="$(aws elbv2 describe-target-groups --names "threadbrief-$ENV-api" --query "TargetGroups[0].TargetGroupArn" --output text)"
-      web_tg="$(aws elbv2 describe-target-groups --names "threadbrief-$ENV-web" --query "TargetGroups[0].TargetGroupArn" --output text)"
-      echo "API target group: $api_tg"
-      aws elbv2 describe-target-health --target-group-arn "$api_tg"
-      echo "WEB target group: $web_tg"
-      aws elbv2 describe-target-health --target-group-arn "$web_tg"
+      # Tail the API Lambda's CloudWatch logs
+      tf_init_select_workspace "$ENV" "$ROOT_DIR/infra/terraform"
+      lambda_function="$(terraform -chdir="$ROOT_DIR/infra/terraform" output -raw lambda_function_name)"
+      aws logs tail "/aws/lambda/$lambda_function" --since 10m
       exit 0
       ;;
 
     deploy)
       # Deploy pipeline:
-      #   1) Ensure secrets are restored/imported (so Terraform apply won't fail)
-      #   2) Terraform apply (creates infra if missing)
-      #   3) Get ECR repo URLs + ECS service names from Terraform outputs
-      #   4) docker build + docker push API + WEB images
-      #   5) force-new-deployment on ECS services
-      echo "[$ENV] Deploying images to ECR and updating ECS services..."
+      #   1) Terraform apply (creates/updates S3, CloudFront, Lambda, DynamoDB)
+      #   2) Build + push the API's Lambda container image, update the function
+      #   3) Build the static web export (pointed at the Lambda Function URL) and sync to S3
+      #   4) Invalidate the CloudFront cache
+      echo "[$ENV] Deploying..."
       AWS_REGION="${AWS_REGION:-ap-southeast-2}"
-      TAG="${TAG:-latest}"
       TF_DIR="$ROOT_DIR/infra/terraform"
 
       # If Docker isn't running, build/push can't work
@@ -706,19 +569,6 @@ print(f"Overview: {overview}")
         echo "Docker daemon not running. Start Docker Desktop and retry." >&2
         exit 1
       fi
-
-      # Auto-restore secrets that are scheduled for deletion so apply can recreate/attach them.
-      # (AWS Secrets Manager lets you schedule deletion; restore cancels it.)
-      for secret_name in \
-        "threadbrief/$ENV/gemini_api_key" \
-        "threadbrief/$ENV/ytdlp_cookies" \
-        "threadbrief/$ENV/ytdlp_proxy"; do
-        if aws secretsmanager describe-secret --secret-id "$secret_name" --query "DeletedDate" --output text >/dev/null 2>&1; then
-          if [ "$(aws secretsmanager describe-secret --secret-id "$secret_name" --query "DeletedDate" --output text 2>/dev/null)" != "None" ]; then
-            aws secretsmanager restore-secret --secret-id "$secret_name" >/dev/null
-          fi
-        fi
-      done
 
       # Collect terraform var files:
       #   envs/<ENV>.tfvars is required
@@ -758,22 +608,6 @@ print(f"Overview: {overview}")
         export NEXT_PUBLIC_GA_ID="$(tr -d '\n' < "$GA_FILE")"
       fi
 
-      # Import any existing secrets into state so apply doesn't fail on duplicates.
-      # This is the exact same concept as Route53 zones: "if it exists, import it first"
-      for secret_name in \
-        "threadbrief/$ENV/gemini_api_key:aws_secretsmanager_secret.gemini[0]" \
-        "threadbrief/$ENV/ytdlp_cookies:aws_secretsmanager_secret.ytdlp_cookies[0]" \
-        "threadbrief/$ENV/ytdlp_proxy:aws_secretsmanager_secret.ytdlp_proxy[0]"; do
-        secret_id="${secret_name%%:*}"
-        tf_addr="${secret_name##*:}"
-        if aws secretsmanager describe-secret --secret-id "$secret_id" --query "ARN" --output text >/dev/null 2>&1; then
-          secret_arn="$(aws secretsmanager describe-secret --secret-id "$secret_id" --query "ARN" --output text 2>/dev/null)"
-          if [ -n "$secret_arn" ] && [ "$secret_arn" != "None" ]; then
-            terraform -chdir="$TF_DIR" import "${VARS_ARGS[@]}" "$tf_addr" "$secret_arn" >/dev/null 2>&1 || true
-          fi
-        fi
-      done
-
       # Optionally resync before apply (RESYNC=1)
       if [ "${RESYNC:-}" = "1" ]; then
         echo "[$ENV] Resyncing existing resources into state..."
@@ -785,39 +619,13 @@ print(f"Overview: {overview}")
       # Apply infra
       terraform -chdir="$TF_DIR" apply "${VARS_ARGS[@]}" -auto-approve
 
-      # Pull outputs from terraform (source of truth for repo URLs + service names)
+      # Pull outputs from terraform (source of truth for repo/bucket/function names)
       api_repo="$(terraform -chdir="$TF_DIR" output -raw api_ecr_url)"
-      web_repo="$(terraform -chdir="$TF_DIR" output -raw web_ecr_url)"
-      cluster_name="$(terraform -chdir="$TF_DIR" output -raw ecs_cluster_name)"
-      api_service="$(terraform -chdir="$TF_DIR" output -raw api_service_name)"
-      web_service="$(terraform -chdir="$TF_DIR" output -raw web_service_name)"
-      api_domain="$(terraform -chdir="$TF_DIR" output -raw api_domain)"
 
       # Login to ECR (auth token)
       aws ecr get-login-password --region "$AWS_REGION" \
         | docker login --username AWS --password-stdin "${api_repo%/*}"
 
-      # Build + push API container
-      echo "[BUILD] API image"
-      docker build -t "$api_repo:$TAG" "$ROOT_DIR/services/api"
-      docker push "$api_repo:$TAG"
-
-      # Build + push WEB container (inject API base URL into Next.js build)
-      echo "[BUILD] WEB image"
-      docker build -t "$web_repo:$TAG" \
-        --build-arg NEXT_PUBLIC_API_BASE_URL="https://${api_domain}" \
-        --build-arg NEXT_PUBLIC_MAX_VIDEO_MINUTES="${MAX_VIDEO_MINUTES:-10}" \
-        --build-arg NEXT_PUBLIC_GA_ID="${NEXT_PUBLIC_GA_ID:-}" \
-        -f "$ROOT_DIR/services/web/Dockerfile.prod" \
-        "$ROOT_DIR/services/web"
-      docker push "$web_repo:$TAG"
-
-      # Restart ECS services so they pull the new image tag
-      echo "[DEPLOY] Updating ECS services"
-      aws ecs update-service --cluster "$cluster_name" --service "$api_service" --force-new-deployment > /dev/null
-      aws ecs update-service --cluster "$cluster_name" --service "$web_service" --force-new-deployment > /dev/null
-
-      # --- Lambda + S3/CloudFront (replaces ECS once cut over) ---
       lambda_function="$(terraform -chdir="$TF_DIR" output -raw lambda_function_name)"
       lambda_url="$(terraform -chdir="$TF_DIR" output -raw lambda_function_url)"
       s3_bucket="$(terraform -chdir="$TF_DIR" output -raw web_s3_bucket)"
@@ -848,9 +656,9 @@ print(f"Overview: {overview}")
       echo "[DEPLOY] Invalidating CloudFront cache"
       aws cloudfront create-invalidation --distribution-id "$cf_distribution_id" --paths "/*" > /dev/null
 
-      echo "[DONE] Deploy triggered for $ENV (tag=$TAG)"
-      echo "[DONE] Lambda API URL (no custom domain yet): $lambda_url"
-      echo "[DONE] CloudFront web URL (no custom domain yet): https://$(terraform -chdir="$TF_DIR" output -raw cloudfront_domain_name)"
+      echo "[DONE] Deploy complete for $ENV"
+      echo "[DONE] Lambda API URL: $lambda_url"
+      echo "[DONE] Web: https://$(terraform -chdir="$TF_DIR" output -raw web_domain)"
       exit 0
       ;;
 
