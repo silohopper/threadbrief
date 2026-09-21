@@ -98,3 +98,15 @@ variable "max_video_minutes" {
   description = "Max YouTube video length (minutes) allowed for brief generation."
   default     = 10
 }
+
+variable "api_lambda_image_tag" {
+  type        = string
+  description = "API Lambda container image tag to deploy (kept separate from api_image_tag, which is the ECS image)."
+  default     = "lambda-latest"
+}
+
+variable "cloudfront_price_class" {
+  type        = string
+  description = "CloudFront price class for the web distribution."
+  default     = "PriceClass_100"
+}

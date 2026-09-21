@@ -334,12 +334,12 @@ export default function HomePage() {
             </Box>
 
             <Box sx={{ display: "flex", gap: 1.5, mt: 3, flexWrap: "wrap" }}>
-              <Button variant="contained" href={`/b/${brief.id}`} sx={{ fontWeight: 700 }}>
+              <Button variant="contained" href={`/b?id=${brief.id}`} sx={{ fontWeight: 700 }}>
                 Open share link
               </Button>
               <Button
                 variant="outlined"
-                onClick={() => navigator.clipboard.writeText(`${window.location.origin}/b/${brief.id}`)}
+                onClick={() => navigator.clipboard.writeText(`${window.location.origin}/b?id=${brief.id}`)}
               >
                 Copy link
               </Button>

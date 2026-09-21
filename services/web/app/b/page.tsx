@@ -1,7 +1,8 @@
 "use client";
 import * as React from "react";
 import axios from "axios";
-import Header from "../../../components/Header";
+import { useSearchParams } from "next/navigation";
+import Header from "../../components/Header";
 import { Container, Box, Typography, Chip, Button, Alert, Card, Divider } from "@mui/material";
 
 type Brief = {
@@ -22,20 +23,34 @@ type Brief = {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
 
-export default function BriefPage({ params }: { params: { id: string } }) {
+export default function BriefPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <BriefPageContent />
+    </React.Suspense>
+  );
+}
+
+function BriefPageContent() {
+  const searchParams = useSearchParams();
+  const id = searchParams.get("id");
   const [brief, setBrief] = React.useState<Brief | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
+    if (!id) {
+      setError("No brief id provided.");
+      return;
+    }
     (async () => {
       try {
-        const res = await axios.get(`${API_BASE}/v1/briefs/${params.id}`);
+        const res = await axios.get(`${API_BASE}/v1/briefs/${id}`);
         setBrief(res.data);
       } catch (e: any) {
         setError(e?.response?.data?.detail || "Brief not found.");
       }
     })();
-  }, [params.id]);
+  }, [id]);
 
   return (
     <>

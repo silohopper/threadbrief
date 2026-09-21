@@ -8,7 +8,7 @@ from nanoid import generate
 
 from app.models import CreateBriefRequest, BriefMeta, Brief
 from app.settings import settings
-from app.storage import memory_store
+from app.storage import store
 from app.utils import is_probably_youtube_url, clean_pasted_text
 from app.youtube import fetch_youtube_transcript, get_ytdlp_info, TranscriptError
 from app.llm import build_prompt, generate_brief_gemini, mock_brief
@@ -52,7 +52,7 @@ async def create_brief(payload: CreateBriefRequest, request: Request):
     """
     ip = client_ip(request)
     dk = day_key_utc()
-    current = memory_store.get_rate(ip, dk)
+    current = store.get_rate(ip, dk)
     if current >= settings.rate_limit_per_day:
         raise HTTPException(status_code=429, detail=f"Daily limit reached ({settings.rate_limit_per_day}/day).")
 
@@ -101,13 +101,13 @@ async def create_brief(payload: CreateBriefRequest, request: Request):
         llm_text = mock_brief(prompt)
 
     brief_id = generate(size=6, alphabet=ALPHABET)
-    share_url = f"{settings.web_base_url}/b/{brief_id}"
+    share_url = f"{settings.web_base_url}/b?id={brief_id}"
 
     brief = parse_llm_text(llm_text, brief_id=brief_id, share_url=share_url, meta=meta)
 
     # Store
-    memory_store.save_brief(brief)
-    memory_store.bump_rate(ip, dk)
+    store.save_brief(brief)
+    store.bump_rate(ip, dk)
 
     return brief
 
@@ -119,7 +119,7 @@ def get_video_meta(url: str, request: Request):
         raise HTTPException(status_code=400, detail="Please enter a valid YouTube URL.")
     ip = client_ip(request)
     dk = f"video-meta:{day_key_utc()}"
-    current = memory_store.get_rate(ip, dk)
+    current = store.get_rate(ip, dk)
     if current >= settings.rate_limit_per_day:
         raise HTTPException(status_code=429, detail=f"Daily limit reached ({settings.rate_limit_per_day}/day).")
     info = get_ytdlp_info(url)
@@ -130,7 +130,7 @@ def get_video_meta(url: str, request: Request):
         duration = info.get("duration")
         if isinstance(duration, (int, float)):
             duration_seconds = int(duration)
-    memory_store.bump_rate(ip, dk)
+    store.bump_rate(ip, dk)
     return {
         "duration_seconds": duration_seconds,
         "duration_minutes": round(duration_seconds / 60, 2) if duration_seconds else None,
@@ -141,7 +141,7 @@ def get_video_meta(url: str, request: Request):
 @router.get("/briefs/{brief_id}", response_model=Brief)
 def get_brief(brief_id: str):
     """Return a previously generated brief by id."""
-    brief = memory_store.get_brief(brief_id)
+    brief = store.get_brief(brief_id)
     if not brief:
         raise HTTPException(status_code=404, detail="Brief not found.")
     return brief

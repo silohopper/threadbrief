@@ -15,6 +15,7 @@ __pycache__
 *.pyc
 dist
 .next
+out
 .terraform
 terraform.tfstate
 terraform.tfstate.*

@@ -116,6 +116,10 @@ script without granting full admin access.
         "logs:*",
         "route53:*",
         "secretsmanager:*",
+        "dynamodb:*",
+        "lambda:*",
+        "s3:*",
+        "cloudfront:*",
         "sts:GetCallerIdentity"
       ],
       "Resource": "*"
@@ -126,6 +130,10 @@ script without granting full admin access.
 If you want “delete and re-add” to be the default recovery path, make sure this
 policy includes `iam:DeletePolicyVersion` so Terraform can fully remove and
 recreate IAM policies during rebuilds.
+
+`dynamodb:*`, `lambda:*`, `s3:*`, and `cloudfront:*` are required for the
+static web (S3 + CloudFront) and API (Lambda + DynamoDB) stack, in addition
+to (not instead of) the ECS/ALB permissions above during the transition.
 
 ## Step 5) Decide your domains
 For staging we will use:

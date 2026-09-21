@@ -11,6 +11,7 @@ class Settings(BaseModel):
     cors_origins: str = os.getenv("CORS_ORIGINS", "http://localhost:3000")
     web_base_url: str = os.getenv("WEB_BASE_URL", "http://localhost:3000")
     storage_backend: str = os.getenv("STORAGE_BACKEND", "memory")
+    dynamodb_table: str | None = os.getenv("DYNAMODB_TABLE")
     gemini_api_key: str | None = os.getenv("GEMINI_API_KEY")
     rate_limit_per_day: int = int(os.getenv("RATE_LIMIT_PER_DAY", "100"))
     max_video_minutes: int = int(os.getenv("MAX_VIDEO_MINUTES", "10"))

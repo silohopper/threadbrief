@@ -7,7 +7,7 @@ import os
 import httpx
 from app.models import ModeType, LengthType
 
-GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent"
+GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1/models/gemini-3.6-flash:generateContent"
 
 
 def _length_guidance(length: LengthType) -> str:

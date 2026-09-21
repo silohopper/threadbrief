@@ -817,7 +817,40 @@ print(f"Overview: {overview}")
       aws ecs update-service --cluster "$cluster_name" --service "$api_service" --force-new-deployment > /dev/null
       aws ecs update-service --cluster "$cluster_name" --service "$web_service" --force-new-deployment > /dev/null
 
+      # --- Lambda + S3/CloudFront (replaces ECS once cut over) ---
+      lambda_function="$(terraform -chdir="$TF_DIR" output -raw lambda_function_name)"
+      lambda_url="$(terraform -chdir="$TF_DIR" output -raw lambda_function_url)"
+      s3_bucket="$(terraform -chdir="$TF_DIR" output -raw web_s3_bucket)"
+      cf_distribution_id="$(terraform -chdir="$TF_DIR" output -raw cloudfront_distribution_id)"
+
+      echo "[BUILD] API Lambda image"
+      docker build -t "$api_repo:lambda-latest" -f "$ROOT_DIR/services/api/Dockerfile.lambda" "$ROOT_DIR/services/api"
+      docker push "$api_repo:lambda-latest"
+
+      echo "[DEPLOY] Updating Lambda function code"
+      aws lambda update-function-code \
+        --function-name "$lambda_function" \
+        --image-uri "$api_repo:lambda-latest" \
+        --region "$AWS_REGION" > /dev/null
+      aws lambda wait function-updated --function-name "$lambda_function" --region "$AWS_REGION"
+
+      echo "[BUILD] WEB static export (target: Lambda Function URL)"
+      (cd "$ROOT_DIR/services/web" && \
+        (npm ci || npm install) && \
+        NEXT_PUBLIC_API_BASE_URL="$lambda_url" \
+        NEXT_PUBLIC_MAX_VIDEO_MINUTES="${MAX_VIDEO_MINUTES:-10}" \
+        NEXT_PUBLIC_GA_ID="${NEXT_PUBLIC_GA_ID:-}" \
+        npm run build)
+
+      echo "[DEPLOY] Syncing static export to s3://$s3_bucket"
+      aws s3 sync "$ROOT_DIR/services/web/out" "s3://$s3_bucket" --delete
+
+      echo "[DEPLOY] Invalidating CloudFront cache"
+      aws cloudfront create-invalidation --distribution-id "$cf_distribution_id" --paths "/*" > /dev/null
+
       echo "[DONE] Deploy triggered for $ENV (tag=$TAG)"
+      echo "[DONE] Lambda API URL (no custom domain yet): $lambda_url"
+      echo "[DONE] CloudFront web URL (no custom domain yet): https://$(terraform -chdir="$TF_DIR" output -raw cloudfront_domain_name)"
       exit 0
       ;;
 

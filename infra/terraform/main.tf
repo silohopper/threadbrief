@@ -10,23 +10,23 @@ data "aws_subnets" "default" {
 }
 
 data "aws_route53_zone" "this" {
-  count = var.manage_hosted_zone ? 0 : 1
+  count        = var.manage_hosted_zone ? 0 : 1
   zone_id      = var.route53_zone_id != "" ? var.route53_zone_id : null
   name         = var.route53_zone_id == "" ? var.domain_name : null
   private_zone = false
 }
 
 locals {
-  api_base_url  = "https://${var.api_domain}"
-  web_base_url  = var.web_base_url != "" ? var.web_base_url : "https://${var.web_domain}"
-  cors_origins  = var.cors_origins != "" ? var.cors_origins : "https://${var.web_domain}"
-  api_image     = "${aws_ecr_repository.api.repository_url}:${var.api_image_tag}"
-  web_image     = "${aws_ecr_repository.web.repository_url}:${var.web_image_tag}"
-  gemini_secret_arn  = try(aws_secretsmanager_secret.gemini[0].arn, null)
-  cookies_secret_arn = try(aws_secretsmanager_secret.ytdlp_cookies[0].arn, null)
-  proxy_secret_arn   = try(aws_secretsmanager_secret.ytdlp_proxy[0].arn, null)
-  secret_arns        = compact([local.gemini_secret_arn, local.cookies_secret_arn, local.proxy_secret_arn])
-  hosted_zone_id     = var.manage_hosted_zone ? aws_route53_zone.this[0].zone_id : data.aws_route53_zone.this[0].zone_id
+  api_base_url             = "https://${var.api_domain}"
+  web_base_url             = var.web_base_url != "" ? var.web_base_url : "https://${var.web_domain}"
+  cors_origins             = var.cors_origins != "" ? var.cors_origins : "https://${var.web_domain}"
+  api_image                = "${aws_ecr_repository.api.repository_url}:${var.api_image_tag}"
+  web_image                = "${aws_ecr_repository.web.repository_url}:${var.web_image_tag}"
+  gemini_secret_arn        = try(aws_secretsmanager_secret.gemini[0].arn, null)
+  cookies_secret_arn       = try(aws_secretsmanager_secret.ytdlp_cookies[0].arn, null)
+  proxy_secret_arn         = try(aws_secretsmanager_secret.ytdlp_proxy[0].arn, null)
+  secret_arns              = compact([local.gemini_secret_arn, local.cookies_secret_arn, local.proxy_secret_arn])
+  hosted_zone_id           = var.manage_hosted_zone ? aws_route53_zone.this[0].zone_id : data.aws_route53_zone.this[0].zone_id
   hosted_zone_name_servers = var.manage_hosted_zone ? aws_route53_zone.this[0].name_servers : data.aws_route53_zone.this[0].name_servers
   api_env = concat(
     [
@@ -344,7 +344,7 @@ resource "aws_acm_certificate" "this" {
 
 resource "aws_route53_zone" "this" {
   count = var.manage_hosted_zone ? 1 : 0
-  name = var.domain_name
+  name  = var.domain_name
   lifecycle {
     prevent_destroy = true
   }
@@ -453,19 +453,13 @@ resource "aws_route53_record" "web" {
   name    = var.web_domain
   type    = "A"
   alias {
-    name                   = aws_lb.this.dns_name
-    zone_id                = aws_lb.this.zone_id
+    name                   = aws_cloudfront_distribution.web.domain_name
+    zone_id                = aws_cloudfront_distribution.web.hosted_zone_id
     evaluate_target_health = false
   }
 }
 
-resource "aws_route53_record" "api" {
-  zone_id = local.hosted_zone_id
-  name    = var.api_domain
-  type    = "A"
-  alias {
-    name                   = aws_lb.this.dns_name
-    zone_id                = aws_lb.this.zone_id
-    evaluate_target_health = false
-  }
-}
+# No aws_route53_record.api: Lambda Function URLs don't support custom
+# domains, so the API is reached directly via its Function URL
+# (see outputs.tf: lambda_function_url). api_domain / api.<env> DNS is
+# intentionally left unused.
