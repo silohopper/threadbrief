@@ -1,9 +1,16 @@
-# AWS Deploy (ECS Fargate)
+# AWS Deploy (S3 + CloudFront + Lambda + DynamoDB)
 
-This folder contains Terraform for staging/prod in `ap-southeast-2`.
+This folder contains Terraform for `ap-southeast-2`. The stack is fully
+serverless:
 
-If you're new to AWS, follow the steps below in order. Each step explains what
-it does and why.
+- **Web** (`services/web`) is a static Next.js export (`next build` with
+  `output: "export"`) served from a private S3 bucket behind CloudFront.
+- **API** (`services/api`) is a container-image Lambda function, reached
+  directly via its Function URL (no API Gateway — see "Why no API Gateway"
+  below). Briefs and per-IP rate limits are stored in DynamoDB.
+
+There's no ECS, no ALB, and no always-on compute: everything bills
+pay-per-request, so an idle environment costs close to $0/month.
 
 ## Prereqs
 - AWS CLI configured (`aws configure`)
@@ -24,9 +31,16 @@ If anything is missing:
 
 ## Important: separate Terraform state per env
 Staging and prod must not share the same Terraform state. The tooling uses
-Terraform workspaces (`stage`, `prod`) so resources don’t overwrite each other.
+Terraform workspaces (`stage`, `prod`) so resources don't overwrite each
+other.
 
-From now on, use `sh bin/tools.sh stage ...` and `sh bin/tools.sh prod ...` only.
+From now on, use `sh bin/tools.sh stage ...` and `sh bin/tools.sh prod ...`
+only. As of this writing, only `prod` (`threadbrief.com`) is actually
+provisioned — `stage` was torn down after `prod` was verified, since this is
+a demo project that doesn't need a permanent second environment. The
+`stage` workspace still works if you want to stand it back up (`sh bin/tools.sh
+stage up`); it creates the exact same kind of resources as `prod`, just under
+`staging.threadbrief.com`.
 
 ## Known issues (temporary)
 - Route53 hosted zone duplication: if multiple public zones exist for
@@ -83,10 +97,8 @@ script without granting full admin access.
       "Effect": "Allow",
       "Action": [
         "acm:*",
-        "ec2:*",
-        "ecr:*",
-        "ecs:*",
-        "elasticloadbalancing:*",
+        "cloudfront:*",
+        "dynamodb:*",
         "iam:CreateRole",
         "iam:DeleteRole",
         "iam:GetRole",
@@ -113,13 +125,11 @@ script without granting full admin access.
         "iam:ListInstanceProfilesForRole",
         "iam:AttachUserPolicy",
         "iam:DetachUserPolicy",
+        "ecr:*",
+        "lambda:*",
         "logs:*",
         "route53:*",
-        "secretsmanager:*",
-        "dynamodb:*",
-        "lambda:*",
         "s3:*",
-        "cloudfront:*",
         "sts:GetCallerIdentity"
       ],
       "Resource": "*"
@@ -127,32 +137,33 @@ script without granting full admin access.
   ]
 }
 ```
-If you want “delete and re-add” to be the default recovery path, make sure this
+If you want "delete and re-add" to be the default recovery path, make sure this
 policy includes `iam:DeletePolicyVersion` so Terraform can fully remove and
 recreate IAM policies during rebuilds.
 
-`dynamodb:*`, `lambda:*`, `s3:*`, and `cloudfront:*` are required for the
-static web (S3 + CloudFront) and API (Lambda + DynamoDB) stack, in addition
-to (not instead of) the ECS/ALB permissions above during the transition.
-
-## Step 5) Decide your domains
-For staging we will use:
+## Step 5) Decide your domain
+For staging (optional, see above):
 - Web: `staging.threadbrief.com`
-- API: `api.staging.threadbrief.com`
 
-These are already set in `infra/terraform/envs/stage.tfvars`.
+For prod, the web domain is `threadbrief.com`. There is no API domain —
+Lambda Function URLs don't support custom domains, so the API is always
+reached at its raw `*.lambda-url.<region>.on.aws` address (the web app's
+build picks this up automatically from the Terraform output). These are
+already set in `infra/terraform/envs/{stage,prod}.tfvars`.
 
-## Step 6) Provision staging infrastructure
-This creates ECS, ECR, ALB (load balancer), Route53 (DNS), and ACM (SSL certs).
+## Step 6) Provision infrastructure
+This creates the S3 bucket, CloudFront distribution, DynamoDB table, Lambda
+function + Function URL, and the ACM cert CloudFront needs (in us-east-1,
+regardless of `aws_region` — CloudFront requires that).
 ```bash
-sh bin/tools.sh stage up
+sh bin/tools.sh prod up
 ```
 
-If Terraform fails with “already exists” errors (state drift), run:
+If Terraform fails with "already exists" errors (state drift), run:
 ```bash
-sh bin/tools.sh stage resync
+sh bin/tools.sh prod resync
 ```
-Then re-run `sh bin/tools.sh stage up`.
+Then re-run `sh bin/tools.sh prod up`.
 
 ## Step 7) Point GoDaddy DNS to AWS (one time)
 Terraform creates a Route53 hosted zone and gives you 4 name servers. You need
@@ -161,64 +172,32 @@ to point your domain to those name servers.
 ## GoDaddy DNS update
 1) Run this from the repo root to get the Route53 nameservers:
    ```bash
-   sh bin/tools.sh stage dns
+   sh bin/tools.sh prod dns
    ```
 2) Open your domain in GoDaddy → DNS settings.
 3) Replace the existing nameservers with the Route53 values from the command above.
-3) Wait for DNS propagation (usually minutes, sometimes longer).
-
-You only do this once. Stage and prod share the same hosted zone for
-`threadbrief.com`, so there is only one set of name servers.
+4) Wait for DNS propagation (usually minutes, sometimes longer).
 
 Terraform will keep waiting at the ACM validation step until DNS is updated and
 propagated.
 
-If your terminal looks like it’s “stuck” waiting for ACM validation, open a
-second terminal and run:
-```bash
-sh bin/tools.sh stage dns
-```
-Use the output to update GoDaddy nameservers, then wait for propagation so the
-original `stage up` can finish.
-
-You’ll typically see logs like:
-```
-aws_acm_certificate_validation.this: Still creating... [8m10s elapsed]
-aws_acm_certificate_validation.this: Still creating... [8m20s elapsed]
-aws_acm_certificate_validation.this: Still creating... [8m30s elapsed]
-aws_acm_certificate_validation.this: Still creating... [8m40s elapsed]
-```
-
-If you cannot change nameservers (staying on GoDaddy DNS), you must add the ACM
-validation CNAMEs manually. This command will create the ACM certificate (if
-needed) and print the CNAMEs to add in GoDaddy:
-```bash
-sh bin/tools.sh stage cert
-```
-Add each record to GoDaddy DNS exactly as shown (Name/Type/Value).
-
-After adding the CNAMEs in GoDaddy, re-run:
-```bash
-sh bin/tools.sh stage up
-```
-
 ## Step 8) Wait for SSL to validate (ACM)
-ACM is AWS Certificate Manager. It issues your SSL certs for HTTPS.
-Once GoDaddy is pointing at Route53, ACM will validate automatically.
+ACM is AWS Certificate Manager. It issues the cert CloudFront uses for HTTPS.
+Once GoDaddy is pointing at Route53, ACM will validate automatically via the
+DNS records Terraform creates for it — no manual step needed.
 
 How to check ACM:
-1) AWS Console → **ACM** → Certificates.
-2) Open the cert and look for **Status: Issued**.
-3) Under **Domains**, you should see **two entries**:
-   - one for `staging.threadbrief.com`
-   - one for `api.staging.threadbrief.com`
-4) Each domain should show **Success** (validation complete).
-If one is missing, DNS is not fully propagated or the record is missing.
+1) AWS Console → **ACM** (switch to the **us-east-1 / N. Virginia** region —
+   the CloudFront cert lives there regardless of `aws_region`).
+2) Open the cert and confirm **Status: Issued**.
 
-## Step 9) Deploy containers
-This builds Docker images, pushes them to ECR, then restarts ECS services.
+## Step 9) Deploy
+This applies Terraform, builds and pushes the API's Lambda container image,
+force-updates the Lambda function, builds the static web export (pointed at
+the Lambda Function URL), syncs it to S3, and invalidates the CloudFront
+cache.
 ```bash
-sh bin/tools.sh stage deploy
+sh bin/tools.sh prod deploy
 ```
 
 ### Optional: yt-dlp proxy (recommended for AWS)
@@ -226,86 +205,97 @@ YouTube often blocks AWS datacenter IPs even with cookies. A residential proxy
 fixes this. If you have a proxy URL:
 1) Save it to `env/<env>/proxy.txt` (one line, e.g. `http://user:pass@host:port` or
    `host:port:username:password`). We are currently using Decodo (Smartproxy).
-2) Run `sh bin/tools.sh stage deploy`.
+2) Run `sh bin/tools.sh prod deploy`.
 
-The deploy script will read `env/<env>/proxy.txt` (or `env/dev/proxy.txt`) and
-store it as a `YTDLP_PROXY` secret for the API task. Do **not** commit this file.
+The deploy script reads `env/<env>/proxy.txt` (or `env/dev/proxy.txt`) and
+passes it straight to the Lambda function's environment as `YTDLP_PROXY`.
 
 ### Captions-only mode
 The demo API does not run Whisper. Videos must have transcripts/captions available
 via YouTube/yt-dlp or the request will return an error.
 
 ## Step 10) Test
-- Web: https://staging.threadbrief.com
-- API health: https://api.staging.threadbrief.com/health
-
-## Step 11) Provision prod (after staging works)
-```bash
-sh bin/tools.sh prod up
-sh bin/tools.sh prod deploy
-```
-
-## Step 12) Test prod
 - Web: https://threadbrief.com
-- API health: https://api.threadbrief.com/health
+- API health (no custom domain — read the real URL from Terraform):
+  ```bash
+  sh bin/tools.sh prod status   # or: terraform -chdir=infra/terraform output lambda_function_url
+  ```
 
-## Step 13) Destroy (when done)
+## Step 11) Destroy (when done)
 ```bash
-sh bin/tools.sh stage down
+sh bin/tools.sh prod down
 ```
+
+## Why no API Gateway
+API Gateway (REST or HTTP API) hard-caps integration timeouts at ~30 seconds,
+with no way to raise it. Brief generation (transcript fetch + Gemini call) can
+legitimately take several minutes for long videos — prod allows videos up to
+180 minutes and the old ALB was explicitly configured with a 900s idle
+timeout for exactly this reason. A Lambda Function URL inherits Lambda's own
+timeout (up to 900s) instead, with no intermediate proxy imposing a shorter
+cap. The trade-off is no custom domain for the API.
 
 ## Debug checklist (when something goes wrong)
 1) **Terraform state**
-   - Re-run: `sh bin/tools.sh stage up` (auto-resync on failure).
+   - Re-run: `sh bin/tools.sh prod up` (auto-resync on failure).
    - If it still fails or resources are inconsistent, delete and re-add:
-     `sh bin/tools.sh stage down` then `sh bin/tools.sh stage up`.
-2) **ECS service events**
-   - AWS Console → ECS → Cluster → Service → Events.
-3) **Container logs**
-   - CloudWatch Logs → `/ecs/threadbrief/stage/api` and `/ecs/threadbrief/stage/web`.
-4) **Load balancer health**
-   - EC2 → Target Groups → Health.
+     `sh bin/tools.sh prod down` then `sh bin/tools.sh prod up`.
+2) **Lambda logs**
+   ```bash
+   sh bin/tools.sh prod logs
+   ```
+3) **CloudFront**
+   - AWS Console → CloudFront → the distribution → check it's `Deployed`,
+     and check the S3 origin / OAC settings if requests 403.
+4) **DynamoDB**
+   - AWS Console → DynamoDB → `threadbrief-<env>` table → items, to check
+     briefs/rate-limit counters are actually being written.
 5) **DNS**
-   - Route53 → Hosted zone → records exist for `staging.threadbrief.com` + `api.staging.threadbrief.com`.
+   - Route53 → Hosted zone → an A record (alias) for `threadbrief.com` (or
+     `staging.threadbrief.com`) pointing at the CloudFront distribution.
 6) **SSL**
-   - ACM → certificate status should be **Issued**.
+   - ACM (us-east-1) → certificate status should be **Issued**.
 
 ## If Terraform partially creates resources
-Terraform tracks what it created. Re-run `sh bin/tools.sh stage up` to finish. If
-that fails, use the “delete and re-add” path: `sh bin/tools.sh stage down` then
-`sh bin/tools.sh stage up`. This is more bullet-proof but requires delete
-permissions (notably `iam:DeletePolicyVersion`) so Terraform can remove and
+Terraform tracks what it created. Re-run `sh bin/tools.sh prod up` to finish. If
+that fails, use the "delete and re-add" path: `sh bin/tools.sh prod down` then
+`sh bin/tools.sh prod up`. This is more bullet-proof but requires delete
+permissions (notably `iam:DeletePolicyVersion`) so Terraform can fully remove and
 recreate IAM policies and related resources.
 
 ## Teardown behavior
-- `stage down` and `prod down` keep the Route53 hosted zone intact (removed from
-  Terraform state) to avoid breaking DNS for the other environment.
+- `prod down` keeps the Route53 hosted zone intact (removed from
+  Terraform state) to avoid breaking DNS.
 - If you ever need to delete the hosted zone, do it manually after removing the
   `prevent_destroy` guard.
 
-
 ## Notes
-- Images are pushed to ECR with tag `latest` by default (override with `TAG=...`).
-- `GEMINI_API_KEY` is stored in Secrets Manager if provided via tfvars.
+- The Lambda image is pushed to ECR under the `lambda-latest` tag (the same
+  ECR repo used to exist for ECS images — now solely for the Lambda image).
+- `GEMINI_API_KEY`, `YTDLP_COOKIES`, and `YTDLP_PROXY` are passed to the
+  Lambda function as plain environment variables (via Terraform), the same
+  way ECS ultimately exposed them to its containers — just provisioned
+  directly instead of via Secrets Manager, since Lambda has no equivalent
+  ECS-agent-style secret injection.
 
 ## Optional: YouTube cookies (for bot checks)
-If YouTube blocks downloads in staging, add cookies:
+If YouTube blocks downloads, add cookies:
 1) Log into YouTube in your browser.
 2) Export cookies to a `cookies.txt` file (browser extension).
-3) Paste the contents into `infra/terraform/envs/stage.local.tfvars`:
+3) Paste the contents into `infra/terraform/envs/prod.local.tfvars`:
    ```
    ytdlp_cookies = """PASTE_COOKIES_TXT_HERE"""
    ```
 4) Re-apply and deploy:
    ```bash
-   sh bin/tools.sh stage deploy
+   sh bin/tools.sh prod deploy
    ```
 
-## Cost control ideas
-- **Scale ECS to zero** for staging when idle (manual or scheduled).
-- Use smaller task sizes for stage if performance allows.
-- Serve the web UI from S3 + CloudFront (static) instead of Fargate.
-- Keep ACM (free) and Route53 (low cost) as-is.
+## Cost
+At low/demo traffic, this stack runs close to $0/month: S3 storage of a few
+MB, CloudFront on the cheapest price class, Lambda and DynamoDB both on
+pay-per-request billing with generous free tiers, and no always-on compute
+(no ECS Fargate task, no ALB) billing by the hour regardless of traffic.
 
 ## Product reminders
 - Add an ETA/progress bar during brief generation (smooth % based on stages).

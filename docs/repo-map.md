@@ -95,8 +95,13 @@ Python API that:
   - Tooling metadata (formatting/lint/test configuration, packaging hints). If you standardize on one dependency system later, this can become the source of truth.
 
 - **`services/api/handler.py`**
-  - Optional AWS Lambda entrypoint using `Mangum`.
-  - Unused in current ECS Fargate deployments.
+  - AWS Lambda entrypoint using `Mangum`. This is how the API actually runs
+    in prod: a container-image Lambda behind a Function URL, not ECS.
+
+- **`services/api/Dockerfile.lambda`**
+  - Container build for the Lambda deployment (same base image and pip
+    install as `Dockerfile`, plus `awslambdaric` and a different
+    entrypoint/CMD for the Lambda Runtime API).
 
 ### Application code (`services/api/app/`)
 
@@ -128,10 +133,12 @@ Python API that:
   - Loads env-driven settings (APP_ENV, CORS_ORIGINS, STORAGE_BACKEND, GEMINI_API_KEY, RATE_LIMIT_PER_DAY).
 
 - **`services/api/app/storage.py`**
-  - `MemoryStore` implementation:
-    - stores briefs by `id`
-    - tracks rate-limit counters per `(ip, day_key)`
-  - Note: this is demo-only; production would move to Redis/Postgres.
+  - Two backends behind a shared interface (`save_brief`/`get_brief`/`bump_rate`/`get_rate`):
+    - `MemoryStore` — in-process dict, used for local dev (`STORAGE_BACKEND=memory`, the default).
+    - `DynamoStore` — used in deployed envs (`STORAGE_BACKEND=dynamodb`). Required on Lambda: different invocations
+      can land on different execution environments, so an in-memory store can't reliably serve a brief created by
+      one request from a different one. Both item types (briefs, rate counters) carry a TTL so old data expires
+      on its own.
 
 - **`services/api/app/utils.py`**
   - Small helpers such as:
@@ -145,9 +152,8 @@ Python API that:
   - Includes extra logging for hard-to-debug transcript fetch issues.
 
 - **`services/api/app/llm.py`**
-  - Builds the prompt and calls Gemini via HTTP (`httpx`) when `GEMINI_API_KEY` is set.
+  - Builds the prompt and calls Gemini (`gemini-3.6-flash`) via HTTP (`httpx`) when `GEMINI_API_KEY` is set.
   - Provides `mock_brief()` for deterministic local/dev output when no key is present.
-  - **Important:** In this build, the `mode_hint` line appears malformed (string quoting) and will throw a syntax error until fixed.
 
 - **`services/api/app/parse.py`**
   - Parses “strict-ish” LLM output format into the `Brief` model:
@@ -165,19 +171,24 @@ Frontend UI that:
 - lets users choose input type (YouTube URL or paste)
 - selects mode/length/language
 - calls the API to generate a brief
-- supports share links at `/b/{id}`
+- supports share links at `/b?id={id}`
+
+Deployed as a static export (S3 + CloudFront), not a running Next.js server.
 
 ### Config + tooling
 
 - **`services/web/Dockerfile`**
-  - Container build for the web service.
+  - Container build used only for local dev (`docker-compose`), running `next dev`.
 
 - **`services/web/package.json`**
   - Node deps + scripts (`dev`, `build`, `start`, lint).
   - Uses Next.js + React + Material UI + axios.
 
 - **`services/web/next.config.mjs`**
-  - Next config (app router, build settings).
+  - `output: "export"` (static export, no server), `images.unoptimized` (no
+    Image Optimization API available on a static host), `trailingSlash:
+    true` (so every route emits `<path>/index.html`, which S3 + a CloudFront
+    Function can serve directly).
 
 - **`services/web/tsconfig.json`**
   - TypeScript configuration.
@@ -205,9 +216,12 @@ Frontend UI that:
 - **`services/web/app/about/page.tsx`**
   - About page.
 
-- **`services/web/app/b/[id]/page.tsx`**
-  - Share page route:
-    - loads a brief by id from the API
+- **`services/web/app/b/page.tsx`**
+  - Share page route (`/b?id={id}`, a query param rather than a path
+    segment — a static export can't resolve an arbitrary dynamic path
+    segment without a server):
+    - reads `id` client-side via `useSearchParams()`
+    - loads the brief by id from the API
     - renders it in a shareable format
 
 ### UI components
